@@ -1,6 +1,6 @@
 # automated-forecasting-monorepo
 
-For production hosting, password protection and job schedules, see [deploying a dashboard](packages/ops/DASHBOARDS.md).
+To register, publish and schedule a new dashboard, start with the [dashboard setup checklist](dashboards/AGENTS.md).
 
 The Forecasting Research Institute's automated forecasting: a standing panel of
 frontier language models, the dashboards that publish its forecasts, and the
