@@ -1,10 +1,63 @@
-# Put a dashboard on the production server
+# Deploy a dashboard on shared forecasting infrastructure
 
 AIRO, EEAI and RSI use the same release builder, static server, scheduler, receipts
 and rollback command. Each installation selects a dashboard by name. Its own
 `current` pointer switches its code, site and schedule together. The serving
 process pins every response to one publication. The existing AIRO configuration
 and `airo` command remain valid.
+
+## Server roles
+
+Use **forecast-prod** for the forecasting server and **forecast-web** for the
+web host in operator tooling and installation notes. These are role names.
+Record the physical machines, SSH targets and public hostnames in the private
+installation configuration.
+
+- On forecast-prod, each project has its own release, data, receipts and
+  publication directory. One timer calls `dashboardctl tick-all`. A private
+  `forecast-prod NAME COMMAND` launcher can dispatch to this same CLI.
+- On forecast-web, configure a virtual host for each public hostname, with its
+  own document root and access policy. Set the root to `SITE_ROOT/current`.
+  Keep raw forecasts and forecasting credentials on forecast-prod.
+- A public hostname may reach its virtual host directly or through a legacy
+  forwarding server. If forwarding, preserve the dashboard's identity, verify
+  upstream TLS, and keep its access policy on the shared web host. Existing
+  bookmarks can keep working throughout a migration.
+
+### Put an existing site on the shared web host
+
+1. Copy the active static snapshot into a separate staging directory. Compare a
+   manifest of all file paths and SHA-256 hashes to the current origin. Import
+   any existing password gate privately and keep independent cookie names.
+2. Install `packages/ops/publish_ssh.py` on the web host. Give the SSH account
+   write access to the site's publication root. Configure a verifier executable
+   there that accepts one candidate directory, fetches the public hostname,
+   compares the served release metadata and HTML to the candidate, and checks
+   protected downloads reject anonymous access. Keep passwords outside git.
+3. Test the new virtual host with its intended Host header. For a migrated
+   hostname, test the forwarding rule or traffic switch and retain its existing
+   configuration for rollback. Check public HTTPS with and without credentials
+   as appropriate.
+4. Configure `public_publisher` on forecast-prod using the argv below, with
+   installation-specific absolute paths. The job appends the verified site
+   directory as the final argument. Check **SSH from the forecasting service
+   account** and run `dashboardctl NAME republish` to prove unattended delivery
+   with existing data before enabling a paid schedule.
+
+```json
+{
+  "public_publisher": [
+    "/usr/bin/python3", "/path/to/checked/packages/ops/publish_ssh.py", "send",
+    "--ssh-config", "/path/to/private/ssh-config", "--target", "forecast-web",
+    "--receiver", "/path/to/web-host/publish_ssh.py",
+    "--root", "/path/to/site-root", "--verify", "/path/to/site-verifier"
+  ]
+}
+```
+
+The receiver stages the transfer, checks its archive digest, switches the site
+atomically and runs the verifier. A failed verification restores the preceding
+publication. A publish-only retry never calls the forecasting models.
 
 ## Install another site
 
@@ -95,7 +148,9 @@ reloading. For an intentionally public dashboard, omit the two `auth_basic`
 directives and the private cache policy. [nginx HTTP Basic authentication](https://nginx.org/en/docs/http/ngx_http_auth_basic_module.html)
 
 Verify the **public hostname** after cutover. On a protected site, requests
-without credentials and with an incorrect password must return 401. An
+without credentials and with an incorrect password must not receive the protected
+content. Basic authentication returns 401; a form gate can redirect readers to
+a sign-in page and reject invalid sign-ins there. An
 authenticated request should return the new release and the intended page.
 For EEAI, repeat the access test for `/eeai-data.zip`. The authenticated
 command below prompts for the password.
