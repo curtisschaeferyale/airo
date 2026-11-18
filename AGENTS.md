@@ -1,8 +1,9 @@
 # Development and production
 
 This is automated-forecasting-monorepo: the engine and the scheduler under
-`packages/`, the dashboards (AIRO, EEAI) under `dashboards/`, and submissions
+`packages/`, the dashboards (AIRO, EEAI, RSI) under `dashboards/`, and submissions
 (ForecastBench) under `submissions/`. See `README.md` for the layout.
+For a new dashboard, follow [registration, publication and scheduling](dashboards/AGENTS.md).
 
 Develop and test in the checkout. Production runs from a separate release.
 When the user asks to deploy, merge through the repository's normal PR/check
