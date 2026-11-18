@@ -73,14 +73,14 @@ for (const [title, first, second] of [
   const card = element("article", byId("cards"), undefined, "card");
   element("div", card, title, "label");
   for (const [year, id] of [["2027", first], ["2030", second]]) {
-    const row = element("div", card, undefined, "metric");
+    const row = element(id ? "button" : "div", card, undefined, "metric");
     const v = latest?.answers[id];
     element("span", row, year);
-    const value = element(id ? "button" : "span", row, format(point(v), id), "number");
+    element("span", row, format(point(v), id), "number");
     if (id) {
-      value.setAttribute("aria-label", "Open " + id + " · " + questions.get(id).label);
-      value.setAttribute("aria-haspopup","dialog");
-      value.onclick = () => openQuestion(id,value);
+      row.setAttribute("aria-label", year + " · " + format(point(v), id) + " · Open " + id + " · " + questions.get(id).label);
+      row.setAttribute("aria-haspopup","dialog");
+      row.onclick = () => openQuestion(id,row);
     }
     element("small", row, interval(v, id));
   }
