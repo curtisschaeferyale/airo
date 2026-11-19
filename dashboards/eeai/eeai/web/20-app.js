@@ -18,7 +18,6 @@ if (DATES.includes(said.get("horizon"))) state.horizon = said.get("horizon");
 const historyOf = new Set((said.get("history") || "").split(",").filter(a => a === "hero" || a === "grid"));
 const remember = () => { try { history.replaceState(null, "", `#split=${state.split ? 1 : 0}&horizon=${state.horizon}`
   + (historyOf.size ? `&history=${[...historyOf].join(",")}` : "")); } catch (e) {} };
-const open = new Set();
 const root = document.getElementById("root");
 const charts = [];
 
@@ -50,11 +49,6 @@ function viewToggle(where) {
     [[false, "Current", "Current forecast"], [true, "History", "Forecast history"]].map(([v, text, title]) =>
       h("button", { type: "button", title, "aria-pressed": String(hist === v), "data-k": `${where}|view|${v}`,
         onclick: ev => act(ev, () => { v ? historyOf.add(where) : historyOf.delete(where); }) }, text)));
-}
-function keep(id, summary, body) {
-  const d = h("details", open.has(id) ? { open: "" } : {}, h("summary", {}, summary), h("div", { class: "body" }, body));
-  d.addEventListener("toggle", () => d.open ? open.add(id) : open.delete(id));
-  return d;
 }
 function chartBox(q, size) {
   const box = h("div", { class: "chart" }), where = size === "hero" ? "hero" : "grid";
@@ -94,9 +88,6 @@ function modelTable(q, hz) {
       q.models.map(m => h("tr", {}, h("td", {}, m.label), cols.map(c => h("td", { class: "mono" }, cell(m, c))))))));
 }
 const rationales = q => q.models.map(m => h("p", {}, h("span", { class: "who" }, m.label + ": "), m.rationale || "No rationale given."));
-function rationale(q, hz) {
-  return keep("why:" + q.id, "Model forecasts and rationale", [modelTable(q, hz), rationales(q)]);
-}
 // Each date whose outcome is in: the outcome, and every forecast with its miss.
 function outcomes(q) {
   const cols = [UNCOND].concat(SCEN), rows = q.horizons.filter(z => z.actual && cols.some(c => val(q, z.id, c.id) != null));
@@ -124,27 +115,22 @@ const defined = q => [
   q.preamble && h("p", {}, q.preamble),
   h("p", {}, q.stem + (q.horizons[0].text ? "\n" + q.horizons.map(z => "• " + z.text).join("\n") : "")),
   h("p", {}, q.details), q.resolution_text && h("p", {}, q.resolution_text)];
-function definition(q) {
-  return keep("def:" + q.id, "Question and definition", defined(q));
+function forecastCard(q, card) {
+  const trigger = card.querySelector(".forecast-trigger");
+  return forecastDialog.bind(card, trigger, opener => {
+    const views = [
+      ["Forecasts", body => body.append(...q.horizons.map(z => modelTable(q, z.id)))],
+      ["Definition", body => body.append(...defined(q).filter(Boolean))],
+      ["Rationales", body => body.append(...rationales(q))]
+    ];
+    const observed = outcomes(q);
+    if (observed) views.push(["Outcomes", body => body.append(observed)]);
+    forecastDialog.show(opener, q.category, q.short, views);
+  });
 }
 
-// A small chart's details open full-screen: a tile is too narrow for a table
-// of four forecasts or a page of rationale. One dialog, outside #root so a
-// redraw of the page leaves it alone; the browser's own modal dialog gives
-// the focus trap, Escape, and focus back on the link that opened it.
-const modal = h("dialog", { class: "modal", "aria-labelledby": "modal-title" });
-document.body.append(modal);
-modal.addEventListener("click", ev => { if (ev.target === modal) modal.close(); });   // a click on the backdrop
-function openModal(q, title, body) {
-  modal.replaceChildren(
-    h("header", {}, h("div", {}, h("p", { class: "eyebrow" }, q.category), h("h2", { id: "modal-title" }, `${q.short}: ${title}`)),
-      h("button", { type: "button", class: "close", "aria-label": "Close", onclick: () => modal.close() }, "×")),
-    h("div", { class: "body" }, body));
-  modal.showModal();
-  modal.querySelector(".body").scrollTop = 0;
-}
-function more(q, title, body) {
-  return h("button", { type: "button", class: "more", onclick: () => openModal(q, title, body()) }, title);
+function forecastTitle(text) {
+  return h("button", { type: "button", class: "forecast-trigger" }, text);
 }
 
 function hero(q) {
@@ -153,8 +139,8 @@ function hero(q) {
   const first = q.series[0], firstV = first && (((first.ensemble[hz] || {}).unconditional || {}).p50);
   const delta = q.series.length > 1 && firstV != null ? v - firstV : null;
   const probs = D.part1 && D.part1.scenario_probabilities.ensemble;
-  return h("section", { class: "card" },
-    h("div", { class: "head" }, h("div", {}, h("h2", {}, `US real GDP growth, ${span}`),
+  return forecastCard(q, h("section", { class: "card forecast-card" },
+    h("div", { class: "head" }, h("div", {}, h("h2", {}, forecastTitle(`US real GDP growth, ${span}`)),
       h("p", { class: "sub", style: "color: var(--ink-soft); margin: 4px 0 0" }, history
         ? `How the panel's forecast of annualized growth has moved, each time it was asked` + (q.series.length < 2 ? " (once so far)" : "")
         : "Panel forecast of annualized growth, with the five-year growth record behind it"))),
@@ -174,21 +160,17 @@ function hero(q) {
       h("hr"),
       h("p", { class: "eyebrow" }, "Scenarios"),
       h("p", {}, "AI progress is one of three descriptions of what AI can do by the end of 2030: slow, moderate or rapid. A scenario holds if a panel of experts asked then would most often pick it."
-        + (probs ? ` The models put the chances at ${Math.round(probs.slow)}% slow, ${Math.round(probs.moderate)}% moderate and ${Math.round(probs.rapid)}% rapid.` : ""))),
-    outcomes(q) && keep("out:" + q.id, "Forecasts against outcomes", outcomes(q)), rationale(q, hz), definition(q));
+        + (probs ? ` The models put the chances at ${Math.round(probs.slow)}% slow, ${Math.round(probs.moderate)}% moderate and ${Math.round(probs.rapid)}% rapid.` : "")))));
 }
 
 function tile(q) {
   const hz = horizonOf(q), v = val(q, hz, "unconditional"), p10 = val(q, hz, "unconditional", "p10"), p90 = val(q, hz, "unconditional", "p90");
-  return h("div", { class: "tile" },
-    h("div", { class: "cat" }, q.category), h("h3", {}, q.short),
+  return forecastCard(q, h("article", { class: "tile forecast-card" },
+    h("div", { class: "cat" }, q.category), h("h3", {}, forecastTitle(q.short)),
     state.split
       ? h("div", { class: "num chips mono" }, SCEN.map(sc => h("span", { title: sc.label }, h("i", { class: "sw dot", style: `color: ${sc.color}` }), h("b", {}, fmt(q, val(q, hz, sc.id))))), h("span", {}, `${unitWord(q)} in ${hz}`))
       : h("div", { class: "num mono" }, h("b", {}, fmt(q, v)), ` ${unitWord(q)} in ${hz}`, p10 != null && ` · 80%: ${fmt(q, p10, true)} to ${fmt(q, p90, true)}`),
-    chartBox(q, "mini"),
-    outcomes(q) && more(q, "Forecasts against outcomes", () => outcomes(q)),
-    more(q, "Model forecasts and rationale", () => [q.horizons.map(z => modelTable(q, z.id)), rationales(q)]),
-    more(q, "Question and definition", () => defined(q)));
+    chartBox(q, "mini")));
 }
 
 function progress() {
