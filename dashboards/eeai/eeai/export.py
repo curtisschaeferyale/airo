@@ -10,6 +10,7 @@
 
 Written by `python3 -m eeai build`; the page's "Download data" button serves it.
 """
+import json
 from pathlib import Path
 
 from . import config, survey as S
@@ -35,8 +36,9 @@ the models of a run. Instrument: {instrument}. Runs: {runs}.
 - rationales.csv: each model's written rationale for each question.
 - ai_progress.csv: the answers about AI itself: the probability of each
   scenario, the weight on each capability indicator, and two milestones.
-- questions.json: the questions and scenario definitions as the models saw them.
-- history.csv: the record drawn behind each forecast (series, date, value).
+- questions.json: the current definitions. The run files retain the original prompts.
+- history.csv: the baseline drawn on the page (series, date, value).
+- resolutions.json: frozen outcomes with rule versions and source evidence, when present.
 - runs/: the run files, one JSON object per line and one line per model and
   question. A call's first line carries the prompt, every search and page
   read, and the token usage.
@@ -73,7 +75,7 @@ def progress_lines(runs):
                     yield [r["run_id"], r["run_date"], r["label"], r["model"], item, field, v]
 
 
-def bundle(out, survey, runs, runs_dir=None):
+def bundle(out, survey, runs, runs_dir=None, outcomes=None, history_bytes=None):
     """Write the zip. -> its member names."""
     synthetic = any(r.get("synthetic") for _, rows in runs for r in rows)
     readme = README.format(
@@ -85,7 +87,9 @@ def bundle(out, survey, runs, runs_dir=None):
         ("forecasts.csv", download.csv_text(FORECAST_COLUMNS, forecast_lines(survey, runs))),
         ("rationales.csv", download.csv_text(RATIONALE_COLUMNS, rationale_lines(survey, runs))),
         ("ai_progress.csv", download.csv_text(PROGRESS_COLUMNS, progress_lines(runs))),
-        ("questions.json", config.QUESTIONS),
-        ("history.csv", config.HISTORY),
+        ("questions.json", json.dumps(survey, ensure_ascii=False, indent=1) + "\n"),
+        ("history.csv", config.HISTORY if history_bytes is None else history_bytes),
+        *([("resolutions.json", json.dumps([dict(question=q, horizon=h, **value)
+            for (q, h, _), value in sorted(outcomes.items())], indent=2))] if outcomes else []),
         *((f"runs/{run_id}.jsonl", Path(runs_dir or config.RUNS) / f"{run_id}.jsonl") for run_id, _ in runs),
     ])

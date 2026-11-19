@@ -91,9 +91,11 @@ def validate_jobs(jobs):
             raise ValueError('Job IDs must be unique safe names')
         ids.add(job['id'])
         owner = job.get('dashboard', 'airo')
-        if owner not in DASHBOARDS or (owner != 'airo' and job['kind'] not in ('forecast', 'smoke')):
+        if owner not in DASHBOARDS or (owner != 'airo' and job['kind'] not in ('forecast', 'refresh', 'smoke')):
             raise ValueError('Unknown dashboard or unsupported dashboard job')
-        if job['kind'] not in ('forecast', 'forecastbench', 'news-poll', 'smoke'):
+        if job['kind'] == 'refresh' and owner != 'eeai':
+            raise ValueError('Economic refresh belongs to EEAI')
+        if job['kind'] not in ('forecast', 'forecastbench', 'news-poll', 'refresh', 'smoke'):
             raise ValueError('Unknown job kind')
         if sum(k in job for k in ('at', 'daily_utc', 'weekly_utc')) != 1:
             raise ValueError('Specify one UTC schedule: at, daily_utc or weekly_utc')
@@ -202,6 +204,8 @@ class Runtime:
                    NO_PROXY='localhost,127.0.0.1,::1', no_proxy='localhost,127.0.0.1,::1')
         panel_dir = (self.panel_runtime or self).state / 'data'
         env.update(FORECASTER_ECI_DIR=str(panel_dir), EEAI_ECI_DIR=str(panel_dir))
+        if self.name == 'eeai':
+            env['EEAI_RESULTS'] = str(self.state / 'economic-data')
         return env
 
     def jobs(self, code):
@@ -269,7 +273,7 @@ class Runtime:
             code = self.current.resolve(strict=True) / 'code'
             env = self.environment(code, self.root / 'tmp')
             news = job['kind'] == 'news-poll'
-            argv = [code / '.venv/bin/python', '-m', 'fri_forecaster.alert', 'send', '--deployment', (self.name if job['kind'] == 'forecast' else DEPLOYMENT[job['kind']]),
+            argv = [code / '.venv/bin/python', '-m', 'fri_forecaster.alert', 'send', '--deployment', (self.name if job['kind'] in ('forecast', 'refresh') else DEPLOYMENT[job['kind']]),
                     '--severity', 'notice' if news else 'page', '--title', 'news fetch failed' if news else title,
                     *(['--log', str(log)] if log else []), message]
             subprocess.run(argv, cwd=code, env=env, timeout=120, check=False)
@@ -638,7 +642,8 @@ class Runtime:
             site = self.root / 'sites' / ('job-' + key)
             ledger = self.root / 'runs' / (key + '.alerts.jsonl')
             airo = code / AIRO
-            argv = {'forecast': ['bash', airo / 'code/cron_run.sh'],
+            argv = {'refresh': [code / '.venv/bin/python', '-m', 'eeai', 'refresh'],
+                    'forecast': ['bash', airo / 'code/cron_run.sh'],
                     'news-poll': [code / '.venv/bin/python', airo / 'code/recent_news.py', 'poll'],
                     'forecastbench': ['bash', code / FORECASTBENCH / 'scripts/fb_cron.sh', job.get('due', '')],
                     'smoke': [code / '.venv/bin/python', '-c', 'import redlines, eeai, forecastbench, fri_forecaster, dashboard; print("scheduled runtime smoke passed")']}[job['kind']]
@@ -659,9 +664,9 @@ class Runtime:
                     if not due.strip():
                         started.update(status='skipped', reason='No forecast conditions due')
                         return True
-                expects_site = survey_job or any(len(row.split()) > 1 and row.split()[1] == 'publish'
+                expects_site = job['kind'] == 'refresh' or survey_job or any(len(row.split()) > 1 and row.split()[1] == 'publish'
                                    for row in due.splitlines())
-                if job['kind'] == 'forecast':
+                if job['kind'] in ('forecast', 'refresh'):
                     self.prune_locked()
                 if job['kind'] != 'smoke':
                     self.require_space(publish_data=expects_site, job_kind=job['kind'])
@@ -705,6 +710,9 @@ class Runtime:
                     if target.exists():
                         raise RuntimeError(f'Run already exists: {artifact.name}')
                     artifact.rename(target)
+                    with (self.root / 'logs' / (key + '.log')).open('a') as log:
+                        self.build_data(code, site, env, stdout=log, stderr=subprocess.STDOUT)
+                if job['kind'] == 'refresh':
                     with (self.root / 'logs' / (key + '.log')).open('a') as log:
                         self.build_data(code, site, env, stdout=log, stderr=subprocess.STDOUT)
                 if expects_site or (site / 'index.html').exists():

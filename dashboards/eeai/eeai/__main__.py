@@ -8,9 +8,10 @@ from . import config, instrument, survey as S
 
 def cmd_prompt(args):
     from fri_forecaster import baseline, panel
-    survey, history = S.load(), S.history()
+    from .baselines import current
+    survey = S.load()
     today = date.fromisoformat(args.today) if args.today else datetime.now(timezone.utc).date()
-    prompt, qids = instrument.build_prompt(survey, history, today)
+    prompt, qids = instrument.build_prompt(survey, S.history(current(today)), today)
     members, _ = panel.panel(snapshot_dir=config.ECI_DIR)
     print(f"##### {config.EXPERIMENT} / {config.CONDITION} [{survey['instrument']}]: {len(qids)} questions, "
           f"{S.n_values(survey, today)} values + Part 1, {len(prompt)} chars #####")
@@ -44,7 +45,42 @@ def main(argv=None):
     b.add_argument("--out", help="write only the page, to this file (and the download beside it)")
     b.add_argument("--json", help="also write the page's data here")
     b.add_argument("--site", help="the site folder to write (default eeai/site): index.html, the download, web/")
+    sub.add_parser("resolve", help="record due FRED outcomes under EEAI_RESULTS")
+    sub.add_parser("refresh", help="refresh economic baselines and check due outcomes")
+    replay = sub.add_parser("replay", help="inspect a historical FRED target without storing it")
+    replay.add_argument("question")
+    replay.add_argument("year", type=int)
+    replay.add_argument("--as-of", required=True, type=date.fromisoformat)
+    decision = sub.add_parser("decide", help="record an adjudication or a correction")
+    decision.add_argument("file")
     args = ap.parse_args(argv)
+    if args.cmd == "replay":
+        import json
+        from . import resolve
+        q = next((q for q in S.load()["questions"] if q["id"] == args.question), None)
+        if not q or q["resolution"]["method"] == "adjudicated":
+            ap.error("replay requires an automated economic question")
+        periods = resolve.dates(q["resolution"]["method"], args.year)
+        day = args.as_of.isoformat()
+        got = None
+        if day >= periods[0]:
+            got = resolve.read_target(q, periods, day)
+        print(json.dumps(got or {"status": "awaiting_evidence"}, indent=2))
+        return 0
+    if args.cmd == "decide":
+        from .decisions import apply
+        apply(args.file)
+        return 0
+    if args.cmd == "refresh":
+        import json
+        from . import baselines, resolve
+        print(json.dumps(baselines.refresh(), indent=2))
+        print(f"{resolve.refresh()} resolved target(s)")
+        return 0
+    if args.cmd == "resolve":
+        from .resolve import refresh
+        print(f"{refresh()} resolved target(s)")
+        return 0
     if args.cmd == "prompt":
         return cmd_prompt(args)
     if args.cmd == "run":
