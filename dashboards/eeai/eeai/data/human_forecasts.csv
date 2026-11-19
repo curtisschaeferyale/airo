@@ -317,7 +317,3 @@ scenario_probabilities,2030,unconditional,probability,moderate,superforecaster,4
 scenario_probabilities,2030,unconditional,probability,moderate,full_panel,42.2,555,2026-11-19
 scenario_probabilities,2030,unconditional,probability,rapid,superforecaster,12.6,38,2026-11-19
 scenario_probabilities,2030,unconditional,probability,rapid,full_panel,17.2,555,2026-11-19
-household_robot,2030,unconditional,probability,true,superforecaster,29.0,38,2026-11-19
-household_robot,2030,unconditional,probability,true,full_panel,30.1,560,2026-11-19
-reliability,2030,unconditional,probability,true,superforecaster,46.8,38,2026-11-19
-reliability,2030,unconditional,probability,true,full_panel,47.4,560,2026-11-19

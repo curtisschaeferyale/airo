@@ -9,7 +9,7 @@ WITH participants AS (
   WHERE policy_id IS NULL AND survey = 'final-survey-full' AND weight_within_group > 0
     AND value IS NOT NULL AND participant_id IS NOT NULL
     AND project_participant_group_name IN ('econ', 'ai_expert', 'general_public', 'superforecaster')
-    AND target_variable_id IN ('physical_systems', 'reliability', 'ai_progress_scenario')
+    AND target_variable_id = 'ai_progress_scenario'
   GROUP BY target_variable_id, bin_id, cohort, participant_id
 ), responses AS (
   SELECT *, COUNT(*) OVER (PARTITION BY target_variable_id, bin_id, cohort) AS respondents FROM participants

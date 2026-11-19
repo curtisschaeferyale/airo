@@ -16,8 +16,6 @@ CELL = ("question", "horizon", "condition", "elicited_statistic", "option", "coh
 FIELDS = (*CELL, "value", "respondents", "extracted_on")
 ALIASES = {"whitecollar": "jobs_business_analytical", "bluecollar": "jobs_skilled_trade_industrial",
            "pinkcollar": "jobs_care_service"}
-PROGRESS = {"ai_progress_scenario": "scenario_probabilities", "physical_systems": "household_robot",
-            "reliability": "reliability"}
 
 
 def display_cells():
@@ -32,11 +30,9 @@ def display_cells():
                 for stat in stats:
                     for cohort in COHORTS:
                         cells[q["id"], horizon["id"], condition, stat, "", cohort] = q["decimals"]
-    for question in PROGRESS.values():
-        options = ("slow", "moderate", "rapid") if question == "scenario_probabilities" else ("true",)
-        for option in options:
-            for cohort in COHORTS:
-                cells[question, "2030", "unconditional", "probability", option, cohort] = 1
+    for option in ("slow", "moderate", "rapid"):
+        for cohort in COHORTS:
+            cells["scenario_probabilities", "2030", "unconditional", "probability", option, cohort] = 1
     return cells
 
 
@@ -110,7 +106,11 @@ def summarize(directory, extracted_on, out=SUMMARY):
                     if key not in cells:
                         continue  # The warehouse also includes questions outside the dashboard survey.
                 else:
-                    key = (PROGRESS[target], "2030", "unconditional", "probability", row["bin_id"], row["cohort"])
+                    if target in ("physical_systems", "reliability"):
+                        continue  # Older private extracts also include the two milestone questions.
+                    if target != "ai_progress_scenario":
+                        raise ValueError("Unknown probability target")
+                    key = ("scenario_probabilities", "2030", "unconditional", "probability", row["bin_id"], row["cohort"])
                     if key not in cells:
                         raise ValueError("Unknown probability cell")
                 value, weight = Decimal(row["value"]), Decimal(row["weight"])

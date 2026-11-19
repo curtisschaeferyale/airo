@@ -72,6 +72,8 @@
   /* (tabular figures are for the number; in Season Sans they also widen the space, so the unit turns them off) */
   .stat .v small { font-family: "Season Sans", system-ui, sans-serif; font-variant-numeric: normal; font-size: 14px; color: var(--ink-soft); font-weight: 400; margin-left: 4px; }
   .up { color: var(--accent-orange); } .down { color: var(--uncond); }
+  .scenario-definition { margin-top: 18px; }
+  .scenario-definition p { margin: 4px 0 0; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 16px; color: var(--ink-soft); font-size: 13.5px; }
   .legend span { display: inline-flex; align-items: center; gap: 7px; }
   .survey-dot { display: inline-block; width: 17px; height: 17px; border: 1.5px solid currentColor; border-radius: 50%; }
@@ -91,6 +93,12 @@
   .tip .who > :first-child, .tip .who > i:not(:has(u)), .tip .who > b:not(.mono) { justify-self: start; text-align: left; }
   .tip-number { justify-self: stretch; min-width: 0; text-align: right; }
   .tip-number small { display: block; font-size: 0.85em; line-height: 1.2; opacity: .8; }
+  .tip .tip-label { justify-self: start; text-align: left; }
+  .forecast-date, .sample-size { display: block; font-family: "Season Sans", system-ui, sans-serif; font-weight: 400; line-height: 1.25; }
+  .ai-progress td { vertical-align: top; }
+  .forecast-date { color: var(--ink-soft); font-size: 11px; }
+  .sample-size { color: var(--ink-faint); font-size: 10px; }
+  .tip .forecast-date { color: #ddd; }
   .tip-value { white-space: nowrap; }
   .tip .who b { font-weight: 600; }
   .tip .who u { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; text-decoration: none; }
@@ -107,6 +115,8 @@
   .chips span { display: inline-flex; align-items: center; gap: 5px; }
   .forecast-card { cursor: pointer; }
   .forecast-card:is(:hover,:focus-within) { border-color: var(--link); }
+  .well.forecast-card:is(:hover,:focus-within) .forecast-trigger { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
+  .well .forecast-trigger { text-transform: inherit; letter-spacing: inherit; }
   .forecast-trigger { font: inherit; color: inherit; background: none; padding: 0; border: 0; text-align: left; cursor: pointer; }
   #question-content p { white-space: pre-wrap; }
   #question-content table.tv { margin-bottom: 18px; }
