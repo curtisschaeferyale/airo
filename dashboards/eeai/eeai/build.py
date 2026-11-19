@@ -198,10 +198,8 @@ def main(args):
     history = S.read_history(io.StringIO(history_bytes.decode()))
     blob = build(survey, history=history, runs=runs, outcomes=outcomes)
     blob["outcome_snapshot_id"] = snapshot_id
-    from dashboard import human_forecasts
-    vintage, human = human_forecasts.latest(config.RESULTS / "human_forecasts")
-    if any(r["instrument"] != survey["instrument"] or r["project"] != "eeai" for r in human):
-        raise ValueError("Human forecast snapshot does not match the EEAI instrument")
+    from .human import load as load_human_summary
+    vintage, human = load_human_summary()
     blob["human"] = human
     blob["human_extracted_on"] = vintage
     if human:

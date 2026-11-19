@@ -209,19 +209,23 @@ within-group weight reaches 50%. Each probability uses a weighted mean.
 Respondent counts apply to individual cells. Warehouse-derived medians can
 differ from the paper's rounded estimates.
 
-Run the two SQL files under `eeai/warehouse/` against the EEAI production
-warehouse with standard SQL. Save their grouped results as `economic.csv` and
-`probabilities.csv` in a private directory. With bq, set the warehouse project
-explicitly and pass `--format=csv` and `--max_rows=5000`. From this directory:
+The build reads `eeai/data/human_forecasts.csv`. The page and the download
+use the same rounded values and respondent counts. Git retains the history
+of this summary. Building a release needs no warehouse access or runtime
+survey import.
+
+To refresh the summary, run the two queries under `eeai/warehouse/` against
+the EEAI warehouse. Save their results as `economic.csv` and `probabilities.csv`
+in a private directory. The queries return weights grouped by response value
+and a distinct respondent count per cell. With bq, set the project, use
+standard SQL, and pass `--format=csv --max_rows=1000000`. Python checks the
+reported extract length, computes the weighted statistics, and rounds values
+to the precision shown on the dashboard.
 
 ```bash
-python3 -m eeai import-human "$EXTRACT_DIR" --extracted-on "$EXTRACT_DATE"
-python3 -m eeai build
+python3 -m eeai summarize-human "$EXTRACT_DIR" --extracted-on "$EXTRACT_DATE"
 ```
 
-Keep extracts outside git. The importer checks coverage and writes a dated,
-immutable CSV under `EEAI_RESULTS/human_forecasts`. Reimporting identical data
-for the same date is safe. The site build reads the newest snapshot, including
-when building from stored model runs. The download includes the same cohort
-records, with source targets, survey wave, aggregation method, respondent count,
-and SHA-256 of each source extract. Builds without a snapshot omit the comparison.
+Review the changed summary values, cohort sizes, and question coverage before
+committing the CSV. The dated private runtime snapshots used by earlier releases
+are no longer required by the build.
