@@ -223,7 +223,6 @@ function progress() {
   const sp = p.scenario_probabilities, e = sp?.ensemble;
   const human = HUMAN_PANELS.filter(panel => D.human?.some(row => row.question === "scenario_probabilities" && row.cohort === panel.id));
   const modelDate = formatRunDate(D.latest?.date);
-  // A single popup keeps bar segments and table probabilities in sync.
   const tip = h("div", { id: "progress-tooltip", class: "progress-tooltip", role: "tooltip", hidden: true });
   let active;
   function hide() {
@@ -235,9 +234,9 @@ function progress() {
     const show = ev => {
       hide();
       active = ev.currentTarget;
-      const summary = D.scenarios.find(item => item.id === sc.id)?.summary;
-      tip.replaceChildren(h("b", {}, sc.label + " · " + value + "%"), h("small", {}, source),
-        ...(summary ? [h("p", {}, summary)] : []));
+      tip.replaceChildren(h("b", {}, value == null ? sc.label : sc.label + " · " + value + "%"));
+      if (source) tip.append(h("small", {}, source));
+      else tip.append(h("p", {}, D.scenarios.find(item => item.id === sc.id)?.summary));
       active.setAttribute("aria-describedby", tip.id);
       tip.hidden = false;
       const area = tip.offsetParent.getBoundingClientRect(), rect = active.getBoundingClientRect();
@@ -249,13 +248,13 @@ function progress() {
     return { onpointerenter: show, onpointerleave: leave, onfocus: show, onblur: leave, onclick: show,
       onkeydown: ev => { if (ev.key === "Escape") hide(); } };
   }
-  const probability = (sc, value, date, source, count) => h("td", { class: "mono" },
-    value == null ? "–" : [h("button", { type: "button", class: "probability", ...events(sc, value, source) }, value + "%"),
+  const probability = (value, date, count) => h("td", { class: "mono" },
+    value == null ? "–" : [value + "%",
       forecastDate(date), count && h("small", { class: "sample-size" }, "n=" + count)]);
-  const modelProb = (sc, value, source) => probability(sc, value == null ? null : Math.round(value), modelDate, source);
+  const modelProb = value => probability(value == null ? null : Math.round(value), modelDate);
   const humanProb = sc => human.map(panel => {
     const row = humanCell("scenario_probabilities", "2030", "unconditional", panel.id, "probability", sc.id);
-    return probability(sc, row?.value, humanSurveyDate, panel.label, row?.respondents);
+    return probability(row?.value, humanSurveyDate, row?.respondents);
   });
   const fullPanel = Object.fromEntries(SCEN.map(sc => [sc.id,
     humanCell("scenario_probabilities", "2030", "unconditional", "full_panel", "probability", sc.id)?.value]));
@@ -273,10 +272,9 @@ function progress() {
     h("div", { class: "scroll", style: "margin-top: 14px" }, h("table", { class: "tv" },
       h("thead", {}, h("tr", {}, h("th", {}, "Probability"), h("th", {}, "Model panel"), models.map(mo => h("th", {}, mo)), human.map(panel => h("th", {}, panel.label)))),
       h("tbody", {},
-        SCEN.map(sc => h("tr", {}, h("td", {}, sc.label), modelProb(sc, e?.[sc.id], "Model ensemble"),
-          models.map(mo => modelProb(sc, sp?.models?.[mo]?.[sc.id], mo)), humanProb(sc)))))),
-    tip, D.scenarios.filter(sc => sc.summary).map(sc => h("div", { class: "scenario-definition" },
-      h("h3", {}, sc.label), h("p", {}, sc.summary))));
+        SCEN.map(sc => h("tr", {}, h("th", { scope: "row" }, h("button", { type: "button", class: "scenario-label", ...events(sc) }, sc.label)), modelProb(e?.[sc.id]),
+          models.map(mo => modelProb(sp?.models?.[mo]?.[sc.id])), humanProb(sc)))))),
+    tip);
 }
 
 function download() {
