@@ -84,6 +84,8 @@
   .sw.dot { width: 9px; height: 9px; border: 0; border-radius: 50%; background: currentColor; }
   .chart { position: relative; margin-top: 10px; }
   .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart svg.zooming { overflow: hidden; pointer-events: none; }
+  .chart svg.zooming .fc { animation: none; }
   .chart text { font-family: "Season Sans", system-ui, sans-serif; fill: var(--ink-faint); font-size: 12px; }
   .chart text.end { fill: var(--ink); font-size: 12.5px; }
   .tip { box-sizing: border-box; max-width: 100%; position: absolute; pointer-events: none; background: var(--ink); color: #fff; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45; z-index: 5; box-shadow: var(--shadow); }
