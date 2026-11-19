@@ -54,7 +54,14 @@ def main(argv=None):
     replay.add_argument("--history", action="store_true", help="show every distinct source vintage value")
     decision = sub.add_parser("decide", help="record an adjudication or a correction")
     decision.add_argument("file")
+    human = sub.add_parser("import-human", help="import grouped EEAI warehouse CSVs")
+    human.add_argument("directory")
+    human.add_argument("--extracted-on", required=True)
     args = ap.parse_args(argv)
+    if args.cmd == "import-human":
+        from .human import ingest
+        print(ingest(args.directory, args.extracted_on))
+        return 0
     if args.cmd == "replay":
         import json
         from . import resolve

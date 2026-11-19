@@ -208,6 +208,60 @@ function progress() {
           h("tr", {}, h("td", {}, text), h("td", { class: "mono" }, pct(p[id].ensemble)), D.latest.models.map(mo => h("td", { class: "mono" }, pct(p[id].models[mo])))))))));
 }
 
+const cohortNames = { econ: "Economists", ai_expert: "AI experts", superforecaster: "Superforecasters", general_public: "General public" };
+
+let comparisonQuestion = "gdp", comparisonYear = "2030", comparisonCondition = "unconditional";
+
+function humanComparison() {
+  if (!D.human?.length) return null;
+  const section = h("section", { class: "card", id: "human-forecasts" });
+  const choices = [...D.questions.map(q => [q.id, q.short]), ["scenario_probabilities", "AI progress scenarios"],
+    ["household_robot", "Household robot milestone"], ["reliability", "AI reliability milestone"]];
+  let question = comparisonQuestion, year = comparisonYear, condition = comparisonCondition;
+  const inputs = h("div", { class: "controls" }), results = h("div", { class: "scroll", "aria-live": "polite" });
+  function select(label, choices, current, update) {
+    const control = h("select", { "aria-label": label, onchange: ev => update(ev.target.value) },
+      choices.map(([id, name]) => h("option", { value: id }, name)));
+    control.value = current;
+    return h("label", {}, label + " ", control);
+  }
+  function show(focus) {
+    const rows = D.human.filter(r => r.question === question);
+    const q = D.questions.find(q => q.id === question);
+    const years = [...new Set(rows.map(r => r.horizon))].sort();
+    if (!years.includes(year)) year = years[0];
+    const scenarios = [UNCOND, ...SCEN].filter(s => rows.some(r => r.condition === s.id && r.horizon === year));
+    if (!scenarios.some(s => s.id === condition)) condition = scenarios[0].id;
+    inputs.replaceChildren(select("Question", choices, question, v => { question = v; show("Question"); }),
+      select("Horizon", years.map(y => [y,y]), year, v => { year = v; show("Horizon"); }));
+    if (q) inputs.append(select("Scenario", scenarios.map(s => [s.id,s.label]), condition, v => { condition = v; show("Scenario"); }));
+    const cells = rows.filter(r => r.horizon === year && r.condition === condition);
+    const fields = q ? ["p10","p50","p90"].filter(k => cells.some(r => r.elicited_statistic === k))
+      : question === "scenario_probabilities" ? SCEN.map(s => s.id) : ["true"];
+    const header = k => q ? k.toUpperCase() : k === "true" ? "Probability" : SCEN.find(s => s.id === k).label;
+    const format = v => v == null ? "–" : q ? fmt(q, Number(v)) : Number(v).toFixed(1) + "%";
+    const panel = k => q ? val(q, year, condition, k) : k === "true" ? D.part1?.[question]?.ensemble : D.part1?.[question]?.ensemble?.[k];
+    results.replaceChildren(h("table", { class: "tv" },
+      h("thead", {}, h("tr", {}, h("th", {}, q ? "Forecasters · " + q.unit : "Forecasters"), fields.map(k => h("th", {}, header(k))))),
+      h("tbody", {}, D.latest && h("tr", {}, h("th", { scope: "row" }, "Model panel"), fields.map(k => h("td", {}, format(panel(k))))),
+        Object.entries(cohortNames).map(([id, name]) => h("tr", {}, h("th", { scope: "row" }, name),
+          fields.map(k => {
+            const r = cells.find(r => r.cohort === id && (q ? r.elicited_statistic : r.option) === k);
+            return h("td", {}, r ? format(r.value) + " (n=" + r.respondents + ")" : "–");
+          }))))));
+    comparisonQuestion = question;
+    comparisonYear = year;
+    comparisonCondition = condition;
+    if (focus) inputs.querySelector('[aria-label="' + focus + '"]').focus({preventScroll:true});
+  }
+  show();
+  section.append(h("h2", {}, "Human forecasts"), h("p", { class: "sub" },
+    "Compare the original survey cohorts with the model panel. Economic values are within-group weighted medians for each elicited percentile. Probabilities are weighted means. Each count is the number of respondents."),
+    inputs, results, h("p", { class: "meta" }, "Original EEAI survey · Warehouse extract " + D.human_extracted_on + " · ",
+      h("a", { href: "https://forecastingresearch.org/research/economic-effects-of-ai" }, "Survey methodology")));
+  return section;
+}
+
 function download() {
   return D.download && h("a", { class: "dl", href: D.download, download: D.download,
     title: "Everything: forecasts.csv, rationales.csv, the AI progress answers, the questions, the history, and the run files with every search and page read" },
@@ -232,8 +286,9 @@ function render() {
       h("p", { class: "lede" }, "A panel of frontier AI models takes FRI's Economic Effects of AI survey: where the US economy is heading by 2030 and 2050, and how that depends on how fast AI improves."),
       L && h("p", { class: "meta" }, `Latest run ${L.date} · ${L.models.join(", ")} · each model searches the web before answering`),
       D.synthetic && h("div", { class: "banner", role: "status" }, h("b", {}, "Placeholder data. "), "These numbers are made up to show the layout. No model has been asked yet.")),
-    !L && h("section", { class: "card" }, h("h2", {}, "No forecasts yet"), h("p", { class: "empty" }, "The panel has not been asked. The questions are ready; the first run will fill this page.")),
+    !L && h("section", { class: "card" }, h("h2", {}, "No model forecasts yet"), h("p", { class: "empty" }, "The panel has not been asked. The questions are ready; the first run will fill this page.")),
     L && gdp && hero(gdp),
+    humanComparison(),
     L && h("section", { class: "card" }, h("h2", {}, "The other indicators"),
       h("p", { class: "sub" }, `The survey's 14 other questions. Each panel has its own scale; ` + (historyOf.has("grid")
         ? `the line is the panel's forecast for ${state.horizon}, each time it was asked.`
