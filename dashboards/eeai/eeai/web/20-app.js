@@ -102,7 +102,9 @@ function outcomes(q) {
   const cols = [UNCOND].concat(SCEN), rows = q.horizons.filter(z => z.actual && cols.some(c => val(q, z.id, c.id) != null));
   if (!rows.length) return null;
   const cell = (z, c) => { const v = val(q, z.id, c.id), d = v - z.actual.value;
-    return v == null ? "–" : `${fmt(q, v)} (${missText(q, d)})`; };
+    if (v == null) return "–";
+    if (!scoreable(c.id)) return fmt(q, v);
+    return `${fmt(q, v)} (${missText(q, d)})`; };
   return h("div", { class: "scroll" }, h("table", { class: "tv" },
     h("thead", {}, h("tr", {}, h("th", {}, "Date"), h("th", {}, "Outcome"), cols.map(c => h("th", {}, c.label.replace(" progress", ""))))),
     h("tbody", {}, rows.map(z => h("tr", {}, h("td", {}, z.id), h("td", { class: "mono" }, fmt(q, z.actual.value)),
@@ -111,7 +113,7 @@ function outcomes(q) {
 const defined = q => [
   q.preamble && h("p", {}, q.preamble),
   h("p", {}, q.stem + (q.horizons[0].text ? "\n" + q.horizons.map(z => "• " + z.text).join("\n") : "")),
-  h("p", {}, q.details)];
+  h("p", {}, q.details), q.resolution_text && h("p", {}, q.resolution_text)];
 function definition(q) {
   return keep("def:" + q.id, "Question and definition", defined(q));
 }

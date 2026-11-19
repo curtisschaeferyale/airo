@@ -64,3 +64,6 @@ dashboards/eeai/eeai/data/source/
 dashboards/eeai/eeai/results/
 dashboards/eeai/eeai/site/
 dashboards/eeai/eeai/web/fonts/
+
+# Local FRED credential
+/.fred

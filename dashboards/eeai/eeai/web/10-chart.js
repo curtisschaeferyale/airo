@@ -49,6 +49,7 @@ function fmt(q, v, bare) {
 }
 // A miss, signed, to one more decimal than the values beside it (so 2.5 against 2.5 can read −0.07).
 const missText = (q, d) => (d >= 0 ? "+" : "−") + fmt({ ...q, decimals: q.decimals ? q.decimals + 1 : 0 }, Math.abs(d), true);
+const scoreable = id => id === UNCOND.id || id === window.__EEAI__?.realized_scenario;
 const yearOf = d => +d.slice(0, 4) + (+d.slice(5, 7) - 1) / 12;
 const val = (q, hz, sc, p) => (((q.ensemble || {})[hz] || {})[sc] || {})[p || "p50"];
 
@@ -150,7 +151,7 @@ function drawTimeline(box, q, opts) {
   const x0 = hero ? 2000 : 2008, hist = q.history.map(([d, v]) => [yearOf(d), v, d]).filter(p => p[0] >= x0);
   const last = hist[hist.length - 1];
   const x1 = Math.max(...horizons.map(z => +z.id), last ? last[0] : 0) + (hero ? 0.6 : 0.8);
-  const ys = hist.map(p => p[1]);
+  const ys = hist.map(p => p[1]).concat(settled.map(z => z.actual.value));
   for (const z of horizons) for (const sc of series) for (const p of ["p10", "p50", "p90"]) {
     const v = val(q, z.id, sc.id, p);
     if (v != null && (p === "p50" || sc.id === "unconditional")) ys.push(v);
@@ -168,6 +169,9 @@ function drawTimeline(box, q, opts) {
   }
   if (hist.length > 1) svg.append(s("path", { d: f.path(hist), fill: "none", stroke: "var(--ink)", "stroke-width": hero ? 2 : 1.6, "stroke-linejoin": "round" }));
   svg.append(s("circle", { cx: X(last[0]), cy: Y(last[1]), r: hero ? 4 : 3, fill: "var(--ink)", stroke: "var(--panel)", "stroke-width": 2 }));
+  for (const z of settled) {
+    svg.append(s("circle", { cx: X(yearOf(z.actual.date)), cy: Y(z.actual.value), r: 3, fill: "var(--ink)" }));
+  }
   const ends = [];
   for (const sc of series) {
     const un = sc.id === "unconditional";
@@ -176,7 +180,7 @@ function drawTimeline(box, q, opts) {
       if (v == null) continue;
       const p10 = val(q, z.id, sc.id, "p10"), p90 = val(q, z.id, sc.id, "p90");
       if (un && p10 != null && p90 != null) svg.append(s("line", { class: "fc", x1: X(xa), x2: X(xa), y1: Y(p10), y2: Y(p90), stroke: "var(--band)", "stroke-width": 7, "stroke-linecap": "round" }));
-      svg.append(s("line", { class: "fc", x1: X(xa), x2: X(xa), y1: Y(z.actual.value), y2: Y(v), stroke: sc.color, "stroke-width": 1.5, opacity: 0.6 }));
+      if (scoreable(sc.id)) svg.append(s("line", { class: "fc", x1: X(xa), x2: X(xa), y1: Y(z.actual.value), y2: Y(v), stroke: sc.color, "stroke-width": 1.5, opacity: 0.6 }));
       f.dot(xa, v, sc, true);
     }
     const pts = ahead.map(z => [+z.id, val(q, z.id, sc.id)]).filter(p => p[1] != null);
@@ -199,7 +203,8 @@ function drawTimeline(box, q, opts) {
       breakdown(q, series, z.id, sc => withRange(q, val(q, z.id, sc.id), val(q, z.id, sc.id, "p10"), val(q, z.id, sc.id, "p90")), who, opts.order)];
     const a = z.actual.value;
     return [h("b", {}, `${z.id}: forecast and outcome${kind}`), tipRow("Outcome", fmt(q, a)),
-      breakdown(q, series, z.id, sc => { const v = val(q, z.id, sc.id); return fmt(q, v) + (v == null ? "" : `  (${missText(q, v - a)})`); }, who, opts.order),
+      z.actual.vintage && tipRow("Source vintage", z.actual.vintage),
+      breakdown(q, series, z.id, sc => { const v = val(q, z.id, sc.id); return fmt(q, v) + (v == null || !scoreable(sc.id) ? "" : `  (${missText(q, v - a)})`); }, who, opts.order),
       z.asked && tipRow("Forecast made", z.asked)];
   });
 }
@@ -208,7 +213,8 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 function drawHistory(box, q, opts) {
   const z = q.horizons.find(z => z.id === opts.target), series = opts.split ? SCEN : [UNCOND];
   const at = (r, sc, p) => ((r.ensemble[z.id] || {})[sc.id] || {})[p || "p50"];
-  const runs = q.series.filter(r => series.some(sc => at(r, sc) != null)).map(r => ({ ...r, x: Date.parse(r.at) / 864e5 }));
+  const runs = q.series.filter(r => (!z.resolution_rule || (r.rule_versions?.[z.id] ?? 1) === z.resolution_rule.version)
+    && series.some(sc => at(r, sc) != null)).map(r => ({ ...r, x: Date.parse(r.at) / 864e5 }));
   if (!runs.length) { box.replaceChildren(h("p", { class: "empty" }, `No forecast for ${z.id} yet.`)); return; }
   const span = runs[runs.length - 1].x - runs[0].x, pad = span ? span * 0.06 : 1;
   const ys = z.actual ? [z.actual.value] : [];

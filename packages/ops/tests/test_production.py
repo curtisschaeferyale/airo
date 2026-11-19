@@ -857,3 +857,24 @@ def test_remote_publish_failure_pages_separately_from_survey_failure(runtime, mo
     assert sent[-1][1] == 'publish FAILED'
     assert 'failed to publish dashboard' in sent[-1][2]
     assert (runtime.state / 'results/result').read_text() == 'completed'
+
+
+def test_economic_refresh_failure_keeps_publication(tmp_path, runtime, monkeypatch):
+    runtime = p.Runtime({"dashboard": "eeai", "root": str(tmp_path), "path": "/usr/bin", "socket": "eeai.sock"})
+    active = release(runtime, "active")
+    old_site = active / "site"
+    old_site.mkdir()
+    (old_site / "index.html").write_text("prior publication")
+    p.link(active, runtime.current)
+
+    def unavailable(argv, **kwargs):
+        assert argv[-3:] == ["-m", "eeai", "refresh"]
+        assert kwargs["env"]["EEAI_RESULTS"] == str(runtime.state / "economic-data")
+        raise RuntimeError("FRED unavailable")
+
+    monkeypatch.setattr(p, "run", unavailable)
+    monkeypatch.setattr(runtime, "alert", lambda *args, **kwargs: None)
+    with pytest.raises(RuntimeError, match="FRED unavailable"):
+        runtime.execute_job("eeai-refresh-example", {"id": "eeai-economic-data", "kind": "refresh"})
+    assert (old_site / "index.html").read_text() == "prior publication"
+    assert json.loads((runtime.root / "runs/eeai-refresh-example.json").read_text())["status"] == "failed"

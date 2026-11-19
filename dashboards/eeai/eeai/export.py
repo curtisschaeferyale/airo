@@ -10,6 +10,7 @@
 
 Written by `python3 -m eeai build`; the page's "Download data" button serves it.
 """
+import json
 from pathlib import Path
 
 from . import config, survey as S
@@ -73,7 +74,7 @@ def progress_lines(runs):
                     yield [r["run_id"], r["run_date"], r["label"], r["model"], item, field, v]
 
 
-def bundle(out, survey, runs, runs_dir=None):
+def bundle(out, survey, runs, runs_dir=None, outcomes=None, history_bytes=None):
     """Write the zip. -> its member names."""
     synthetic = any(r.get("synthetic") for _, rows in runs for r in rows)
     readme = README.format(
@@ -85,7 +86,9 @@ def bundle(out, survey, runs, runs_dir=None):
         ("forecasts.csv", download.csv_text(FORECAST_COLUMNS, forecast_lines(survey, runs))),
         ("rationales.csv", download.csv_text(RATIONALE_COLUMNS, rationale_lines(survey, runs))),
         ("ai_progress.csv", download.csv_text(PROGRESS_COLUMNS, progress_lines(runs))),
-        ("questions.json", config.QUESTIONS),
-        ("history.csv", config.HISTORY),
+        ("questions.json", json.dumps(survey, ensure_ascii=False, indent=1) + "\n"),
+        ("history.csv", config.HISTORY if history_bytes is None else history_bytes),
+        *([("resolutions.json", json.dumps([dict(question=q, horizon=h, **value)
+            for (q, h, _), value in sorted(outcomes.items())], indent=2))] if outcomes else []),
         *((f"runs/{run_id}.jsonl", Path(runs_dir or config.RUNS) / f"{run_id}.jsonl") for run_id, _ in runs),
     ])
