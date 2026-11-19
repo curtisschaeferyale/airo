@@ -10,8 +10,10 @@ const terms = {
 };
 const said = new URLSearchParams(location.hash.slice(1));
 const savedYear = said.get("horizon");
-const term = said.get("term") === "long" || (!said.has("term") && savedYear === "2050") ? "long" : "near";
-const state = { split: said.get("split") === "1", term, horizon: terms[term].includes(savedYear) ? savedYear : terms[term].at(-1) };
+const savedTerm = said.get("term");
+const term = savedTerm === "near" || savedTerm === "long" ? savedTerm
+  : terms.near.includes(savedYear) && savedYear !== "2050" ? "near" : "long";
+const state = { split: said.get("split") !== "0", term, horizon: terms[term].includes(savedYear) ? savedYear : terms[term].at(-1) };
 const historyOf = new Set((said.get("history") || "").split(",").filter(a => a === "hero" || a === "grid"));
 const remember = () => { try { history.replaceState(null, "", `#split=${state.split ? 1 : 0}&term=${state.term}`
   + (state.horizon ? `&horizon=${state.horizon}` : "")
@@ -196,7 +198,7 @@ function forecastTitle(text) {
 
 const headlineMeasures = {
   gdp: ["Real GDP growth", "Annualized over the preceding five years"],
-  youth_unemployment: ["Youth unemployment", "U.S. labor force aged 20–24"],
+  lfpr: ["Labor force participation", "Share of U.S. civilian noninstitutional residents aged 16+ in the labor force"],
   wealth_inequality: ["Wealth inequality", "Share of U.S. wealth held by the top 10%"],
 };
 
