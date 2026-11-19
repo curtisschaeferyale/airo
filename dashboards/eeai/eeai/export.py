@@ -36,8 +36,9 @@ the models of a run. Instrument: {instrument}. Runs: {runs}.
 - rationales.csv: each model's written rationale for each question.
 - ai_progress.csv: the answers about AI itself: the probability of each
   scenario, the weight on each capability indicator, and two milestones.
-- questions.json: the questions and scenario definitions as the models saw them.
-- history.csv: the record drawn behind each forecast (series, date, value).
+- questions.json: the current definitions. The run files retain the original prompts.
+- history.csv: the baseline drawn on the page (series, date, value).
+- resolutions.json: frozen outcomes with rule versions and source evidence, when present.
 - runs/: the run files, one JSON object per line and one line per model and
   question. A call's first line carries the prompt, every search and page
   read, and the token usage.

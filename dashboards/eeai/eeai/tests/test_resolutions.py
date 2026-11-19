@@ -1,4 +1,5 @@
 """Replays using published releases, with no network or installation credentials."""
+import io
 import json
 import tempfile
 import unittest
@@ -6,6 +7,7 @@ import zipfile
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from eeai import baselines, build, config, decisions, export, resolve, survey
 from dashboard import resolutions
@@ -21,6 +23,26 @@ class ResolutionTest(unittest.TestCase):
         override = patch.object(config, "RESULTS", self.root)
         override.start()
         self.addCleanup(override.stop)
+
+    def test_fred_requests_set_the_observation_and_vintage_windows(self):
+        key = self.root / "key"
+        key.write_text("fixture")
+        day = "2024-02-02"
+        periods = ["2024-01-01"]
+        with patch("fri_forecaster.keys.value", return_value=None), patch.dict(
+                "os.environ", {"FRED_API_KEY_FILE": str(key)}):
+            for latest, start in ((False, periods[0]), (True, day)):
+                response = io.BytesIO(b'{"count": 0, "observations": []}')
+                with patch.object(resolve, "urlopen", return_value=response) as request:
+                    self.assertEqual(resolve.fetch("UNRATE", periods, day, latest=latest), [])
+                url = urlparse(request.call_args.args[0])
+                args = parse_qs(url.query)
+                self.assertEqual(url.hostname, "api.stlouisfed.org")
+                self.assertEqual(args["api_key"], ["fixture"])
+                self.assertEqual(args["realtime_start"], [start])
+                self.assertEqual(args["realtime_end"], [day])
+                self.assertEqual(args["observation_start"], periods)
+                self.assertEqual(args["observation_end"], periods)
 
     def test_published_releases_through_page_and_download(self):
         # BLS 2024-02-02 Employment Situation; BEA September 2024 annual update
