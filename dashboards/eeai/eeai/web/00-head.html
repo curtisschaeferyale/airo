@@ -108,6 +108,15 @@
   .well p { margin: 0; } .well hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; margin-top: 18px; }
   .tile { border: 1px solid var(--line-soft); border-radius: 14px; padding: 16px 16px 14px; min-width: 0; }
+  .headline-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+  .headline { display: flex; flex-direction: column; }
+  .headline .sub { margin: 4px 0 16px; }
+  .headline-values { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: auto; }
+  .headline small { display: block; color: var(--ink-soft); }
+  .headline-values b { font-size: clamp(24px, 2.7vw, 36px); font-weight: 500; }
+  .headline-values:has(> :nth-child(2)) b { font-size: 19px; }
+  .headline .well { padding: 8px 10px; margin-top: 10px; }
+  @media (max-width: 850px) { .headline-grid { grid-template-columns: 1fr; } }
   .tile .cat { color: var(--ink-faint); font-size: 12px; }
   .tile .num { margin-top: 6px; font-size: 14px; }
   .tile .num b { font-weight: 500; font-size: 17px; }

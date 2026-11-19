@@ -53,7 +53,7 @@ function viewToggle(where) {
         onclick: ev => act(ev, () => { v ? historyOf.add(where) : historyOf.delete(where); }) }, text)));
 }
 function chartBox(q, size) {
-  const box = h("div", { class: "chart" }), where = size === "hero" ? "hero" : "grid";
+  const box = h("div", { class: "chart" }), where = size === "headline" ? "hero" : "grid";
   charts.push(() => drawChart(box, q, { ...state, size, years: terms[state.term], referenceYear, target: horizonOf(q), view: historyOf.has(where) ? "history" : "now",
     order: D.latest ? D.latest.models : [] }));
   return box;
@@ -152,6 +152,9 @@ function forecastCard(q, card) {
       ["Definition", body => body.append(...defined(q).filter(Boolean))],
       ["Rationales", body => body.append(...rationales(q))]
     ];
+    if (q.id in headlineMeasures) views.push(["Scenarios", body => {
+      for (const sc of D.scenarios.filter(sc => sc.summary)) body.append(h("h3", {}, sc.label), h("p", {}, sc.summary));
+    }]);
     const observed = outcomes(q);
     if (observed) views.push(["Outcomes", body => body.append(observed)]);
     forecastDialog.show(opener, q.category, q.short, views);
@@ -162,35 +165,25 @@ function forecastTitle(text) {
   return h("button", { type: "button", class: "forecast-trigger" }, text);
 }
 
-function hero(q) {
-  const hz = horizonOf(q), v = val(q, hz, "unconditional"), p10 = val(q, hz, "unconditional", "p10"), p90 = val(q, hz, "unconditional", "p90");
-  const span = hz ? `, ${hz - 5} to ${hz}` : "", history = historyOf.has("hero");
-  const first = q.series[0], firstV = first && (((first.ensemble[hz] || {}).unconditional || {}).p50);
-  const delta = q.series.length > 1 && firstV != null && v != null ? v - firstV : null;
-  const probs = D.part1 && D.part1.scenario_probabilities.ensemble;
-  return h("section", { class: "card" },
-    h("div", { class: "head" }, h("div", {}, h("h2", {}, `US real GDP growth${span}`),
-      h("p", { class: "sub", style: "color: var(--ink-soft); margin: 4px 0 0" }, history
-        ? `How the panel's forecast of annualized growth has moved, each time it was asked` + (q.series.length < 2 ? " (once so far)" : "")
-        : "Panel forecast of annualized growth, with the five-year growth record behind it"))),
-    hz && (state.split ? h("div", { class: "stats" }, SCEN.map(sc => h("div", { class: "stat" },
-      h("div", { class: "k" }, h("i", { class: "sw dot", style: `color: ${sc.color}; margin-right: 7px` }), sc.label),
-      h("div", { class: "v mono" }, fmt(q, val(q, hz, sc.id)), h("small", {}, "per year")))))
-    : h("div", { class: "stats" },
-      h("div", { class: "stat" }, h("div", { class: "k" }, "Latest panel median, annualized"), h("div", { class: "v big mono" }, fmt(q, v), h("small", {}, "per year"))),
-      p10 != null && h("div", { class: "stat" }, h("div", { class: "k" }, "80% range"), h("div", { class: "v mono" }, `${fmt(q, p10)} to ${fmt(q, p90)}`)),
-      delta != null
-        ? h("div", { class: "stat" }, h("div", { class: "k" }, `Change since ${first.date}`), h("div", { class: "v mono " + (delta >= 0 ? "up" : "down") }, `${delta >= 0 ? "+" : "−"}${Math.abs(delta).toFixed(2)} pp`))
-        : h("div", { class: "stat" }, h("div", { class: "k" }, "First asked"), h("div", { class: "v mono" }, first ? first.date : "–")))),
-    controls("hero"), legend(q.uncertainty && "Unconditional 80% range", history, [q]), chartBox(q, "hero"),
-    forecastCard(q, h("div", { class: "well forecast-card" },
-      h("p", { class: "eyebrow" }, h("button", { type: "button", class: "forecast-trigger",
-        "aria-label": "The question and scenarios: open GDP forecast details" }, "The question")),
-      h("p", {}, `${q.stem} ${q.horizons.find(z => z.id === hz)?.text || ""} Each point is the annualized change over the five years before it, so every forecast is a later point on the same line. The survey asks about 2030 and 2050; the nearer dates are FRI's additions. When the record reaches a date, its forecast stays on the chart as a ring beside the outcome.`),
-      h("hr"),
-      h("p", { class: "eyebrow" }, "Scenarios"),
-      h("p", {}, "AI progress is one of three descriptions of what AI can do by the end of 2030: slow, moderate or rapid. A scenario holds if a panel of experts asked then would most often pick it."
-        + (probs ? ` The models put the chances at ${Math.round(probs.slow)}% slow, ${Math.round(probs.moderate)}% moderate and ${Math.round(probs.rapid)}% rapid.` : "")))));
+const headlineMeasures = {
+  gdp: ["Real GDP growth", "Annualized over the preceding five years"],
+  youth_unemployment: ["Youth unemployment", "U.S. labor force aged 20–24"],
+  wealth_inequality: ["Wealth inequality", "Share of U.S. wealth held by the top 10%"],
+};
+
+function headlines(questions) {
+  return h("section", { class: "card" }, h("h2", {}, "Headline forecasts"),
+    controls("hero"), legend("80% range, where available", historyOf.has("hero"), questions),
+    h("div", { class: "headline-grid" }, questions.map(q => {
+      const [title, measure] = headlineMeasures[q.id], hz = horizonOf(q);
+      const series = state.split ? SCEN : [UNCOND];
+      return h("article", { class: "tile headline" }, h("h3", {}, title), h("p", { class: "sub" }, measure),
+        hz && h("div", { class: "headline-values" }, series.map(sc => h("div", {},
+          h("small", {}, state.split ? sc.label : "Model panel median"),
+          h("b", { class: "mono", style: state.split ? `color: ${sc.color}` : null }, fmt(q, val(q, hz, sc.id)))))),
+        hz && h("small", {}, q.id === "gdp" ? `${hz - 5}–${hz}` : `Beginning of ${hz}`),
+        chartBox(q, "headline"), forecastCard(q, h("div", { class: "well forecast-card" }, forecastTitle("The question and scenarios"))));
+    })));
 }
 
 function tile(q) {
@@ -242,7 +235,8 @@ function render() {
   // is drawn, and a page that is briefly shorter would lose its scroll position.
   root.style.minHeight = root.offsetHeight + "px";
   root.classList.remove("still");
-  const gdp = D.questions.find(q => q.id === "gdp"), rest = D.questions.filter(q => q.id !== "gdp");
+  const top = Object.keys(headlineMeasures).map(id => D.questions.find(q => q.id === id)).filter(Boolean);
+  const rest = D.questions.filter(q => !top.includes(q));
   const L = D.latest, hasForecasts = Boolean(L || D.human?.length);
   // replaceChildren would print a `false` as text, so the absent sections are filtered out.
   root.replaceChildren(...[
@@ -255,11 +249,11 @@ function render() {
       L && h("p", { class: "meta" }, `Latest run ${L.date} · ${L.models.join(", ")} · each model searches the web before answering`),
       D.synthetic && h("div", { class: "banner", role: "status" }, h("b", {}, "Placeholder data. "), "These numbers are made up to show the layout. No model has been asked yet.")),
     !L && h("section", { class: "card" }, h("h2", {}, "No model forecasts yet"), h("p", { class: "empty" }, "The panel has not been asked. The questions are ready; the first run will fill this page.")),
-    hasForecasts && gdp && hero(gdp),
+    hasForecasts && top.length > 0 && headlines(top),
     hasForecasts && h("section", { class: "card" }, h("h2", {}, "The other indicators"),
-      h("p", { class: "sub" }, `The survey's 14 other questions. Each panel has its own scale; ` + (historyOf.has("grid")
-        ? `each chart tracks forecasts for its selected year across runs.`
-        : "dots show model and human forecasts at the available target dates.")),
+      h("p", { class: "sub" }, `Each indicator has its own scale. ` + (historyOf.has("grid")
+        ? `Each chart tracks forecasts for its selected year across runs.`
+        : "Dots show model and human forecasts at the available target dates.")),
       controls("grid"), legend("80% range, where the survey asks for one", historyOf.has("grid"), rest), h("div", { class: "grid" }, rest.map(tile))),
     hasForecasts && progress(),
     D.download && h("section", { class: "card" }, h("div", { class: "head" },

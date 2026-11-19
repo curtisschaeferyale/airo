@@ -101,7 +101,7 @@ straight lines. A recorded outcome appears alongside the forecast. The table
 shows the signed error for unconditional forecasts and for the realized AI
 scenario once FRI records its end-of-2030 decision.
 
-GDP and the other indicators each have a Current/History toggle. Current
+The headline charts for real GDP growth, youth unemployment (ages 20–24), and the wealth share of the top 10% share a Current/History toggle. The remaining indicators have their own toggle. Current
 shows forecasts by target year. History tracks one target across forecast
 runs and shows the outcome once available. The horizon and AI progress
 controls apply across both chart areas. Near-term covers the five calendar
@@ -115,7 +115,7 @@ axis. Each tooltip row gives the forecast date. Human forecasts use the
 October 2025–February 2026 fieldwork period reported in the
 [study methods](https://forecastingresearch.org/research/economic-effects-of-ai).
 In the conditional view, hovering a scenario line reveals its elicited 80%
-interval where available. Open the GDP question and scenarios panel or an
+interval where available. Open a headline question and scenarios panel or an
 indicator card for all forecast tables, the question definition and rationales.
 
 Motion is small and optional: the modal fades in and out, the control just
