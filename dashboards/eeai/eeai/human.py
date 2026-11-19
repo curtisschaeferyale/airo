@@ -11,17 +11,15 @@ from dashboard.download import csv_text
 from . import config, survey
 
 SUMMARY = config.DATA / "human_forecasts.csv"
-COHORTS = ("econ", "ai_expert", "superforecaster", "general_public")
+COHORTS = ("superforecaster", "full_panel")
 CELL = ("question", "horizon", "condition", "elicited_statistic", "option", "cohort")
 FIELDS = (*CELL, "value", "respondents", "extracted_on")
 ALIASES = {"whitecollar": "jobs_business_analytical", "bluecollar": "jobs_skilled_trade_industrial",
            "pinkcollar": "jobs_care_service"}
-PROGRESS = {"ai_progress_scenario": "scenario_probabilities", "physical_systems": "household_robot",
-            "reliability": "reliability"}
 
 
 def display_cells():
-    """The original survey cells and the precision shown in the comparison table."""
+    """The original survey cells and the precision shown in the forecast charts and details."""
     cells = {}
     for q in survey.load()["questions"]:
         for horizon in q["horizons"]:
@@ -32,11 +30,9 @@ def display_cells():
                 for stat in stats:
                     for cohort in COHORTS:
                         cells[q["id"], horizon["id"], condition, stat, "", cohort] = q["decimals"]
-    for question in PROGRESS.values():
-        options = ("slow", "moderate", "rapid") if question == "scenario_probabilities" else ("true",)
-        for option in options:
-            for cohort in COHORTS:
-                cells[question, "2030", "unconditional", "probability", option, cohort] = 1
+    for option in ("slow", "moderate", "rapid"):
+        for cohort in COHORTS:
+            cells["scenario_probabilities", "2030", "unconditional", "probability", option, cohort] = 1
     return cells
 
 
@@ -66,9 +62,12 @@ def load(path=SUMMARY):
         if reader.fieldnames != list(FIELDS):
             raise ValueError("Unexpected public cohort summary columns")
         rows = list(reader)
+    if not rows:
+        return None, []
     cells = display_cells()
-    if len(rows) != len(cells) or {tuple(r[k] for k in CELL) for r in rows} != cells.keys():
-        raise ValueError("Public cohort summary has missing, unknown or duplicate cells")
+    keys = {tuple(r[k] for k in CELL) for r in rows}
+    if len(rows) != len(keys) or not keys <= cells.keys():
+        raise ValueError("Public cohort summary has unknown or duplicate cells")
     dates = {date.fromisoformat(r["extracted_on"]).isoformat() for r in rows}
     if len(dates) != 1:
         raise ValueError("Expected a single cohort extract date")
@@ -107,7 +106,11 @@ def summarize(directory, extracted_on, out=SUMMARY):
                     if key not in cells:
                         continue  # The warehouse also includes questions outside the dashboard survey.
                 else:
-                    key = (PROGRESS[target], "2030", "unconditional", "probability", row["bin_id"], row["cohort"])
+                    if target in ("physical_systems", "reliability"):
+                        continue  # Older private extracts also include the two milestone questions.
+                    if target != "ai_progress_scenario":
+                        raise ValueError("Unknown probability target")
+                    key = ("scenario_probabilities", "2030", "unconditional", "probability", row["bin_id"], row["cohort"])
                     if key not in cells:
                         raise ValueError("Unknown probability cell")
                 value, weight = Decimal(row["value"]), Decimal(row["weight"])
@@ -120,19 +123,19 @@ def summarize(directory, extracted_on, out=SUMMARY):
                 if respondents < 2 or counts.setdefault(key, respondents) != respondents:
                     raise ValueError(f"Invalid cohort count for {key}")
                 distributions[key].append((value, weight * frequency))
-            if length != expected_length:
+            if expected_length is not None and length != expected_length:
                 raise ValueError(f"Incomplete {kind} extract")
-    if distributions.keys() != cells.keys():
-        raise ValueError("Missing survey cells")
     rows = []
-    scenario_totals = defaultdict(Decimal)
+    scenario_values = defaultdict(list)
     for key, places in cells.items():
+        if key not in distributions:
+            continue
         value = aggregate(distributions[key], probability=key[3] == "probability")
         if key[0] == "scenario_probabilities":
-            scenario_totals[key[-1]] += value
+            scenario_values[key[-1]].append(value)
         rows.append(dict(zip(CELL, key, strict=True), value=display_value(value, places),
                          respondents=str(counts[key]), extracted_on=vintage))
-    if any(abs(total - 100) > Decimal("0.000001") for total in scenario_totals.values()):
+    if any(abs(sum(values) - 100) > Decimal("0.000001") for values in scenario_values.values() if len(values) == 3):
         raise ValueError("Scenario probabilities do not sum to 100")
     out = Path(out)
     with NamedTemporaryFile(dir=out.parent, delete=False) as tmp:

@@ -101,19 +101,21 @@ straight lines. A recorded outcome appears alongside the forecast. The table
 shows the signed error for unconditional forecasts and for the realized AI
 scenario once FRI records its end-of-2030 decision.
 
-Each chart area (the GDP panel; the other indicators) has a small toggle at
-the right of its controls: "Current" (the timeline above) or "History", which
-plots the panel's forecast for the selected date against when it was asked,
-run by run, with the outcome as a level line once the record has it. The two
-page-wide controls are the forecast shown and the horizon (the date the
-numbers are about, and how far the timeline runs). The view is kept in the
-page address (`#split=1&horizon=2030&history=hero,grid`). Using a control
-redraws the page and keeps that control where it was on the screen.
+The headline charts for real GDP growth, youth unemployment (ages 20–24), and the wealth share of the top 10% share a Current/History toggle. The remaining indicators have their own toggle. Current
+shows forecasts by target year. History tracks one target across forecast
+runs and shows the outcome once available. The horizon and AI progress
+controls apply across both chart areas. Near-term covers the five calendar
+years after the latest run. Long-term shows the original 2030 and 2050
+targets. History includes a year selector within the chosen window.
+The page address preserves these choices (for example,
+`#split=1&term=long&horizon=2030&history=hero`).
 
-Hovering a forecast shows the panel's median and each model's own answer, one
-column per series shown. On the small charts, the links under each chart
-("Model forecasts and rationale", "Question and definition") open full-screen:
-the forecasts for every date, each model's rationale, the question as asked.
+Hover a target year to compare the available model and human forecasts on one
+axis. Each tooltip row gives the forecast date. Human forecasts use the
+October 2025–February 2026 fieldwork period reported in the
+[study methods](https://forecastingresearch.org/research/economic-effects-of-ai).
+In the conditional view, hovering a scenario line reveals its elicited 80%
+interval where available. Open any forecast card for all forecast tables, the question definition and rationales.
 
 Motion is small and optional: the modal fades in and out, the control just
 used presses in, and the forecasts (not the record or the axes) fade in when a
@@ -202,12 +204,15 @@ guide and requires FRED access from the scheduled runtime.
 
 ## Human survey forecasts
 
-The Human forecasts section compares the original survey's economist, AI expert,
-superforecaster, and general public cohorts with the latest available panel
-values. Each economic cell uses the first reported value at which cumulative
-within-group weight reaches 50%. Each probability uses a weighted mean.
-Respondent counts apply to individual cells. Warehouse-derived medians can
-differ from the paper's rounded estimates.
+Economic charts show two survey medians at each horizon and scenario that
+humans answered. The bold filled dot shows superforecasters with their
+survey weights. The hollow ring shows the full human panel, including
+superforecasters, with one vote per eligible respondent. Both use the lower
+median at an exact half-weight tie. All marks share the target year’s x-coordinate. Hovering anywhere along that
+year shows the model and human estimates together, including respondent counts. The run-history chart gives the original survey
+its own labeled position. Forecast details include counts and elicited ranges.
+The AI progress probability table uses the same two panels and their respective
+weighted and equal-weight means.
 
 The build reads `eeai/data/human_forecasts.csv`. The page and the download
 use the same rounded values and respondent counts. Git retains the history

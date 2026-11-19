@@ -32,9 +32,21 @@ def test_truncated_private_input_preserves_previous_summary(tmp_path):
     with path.open("w") as stream:
         writer = csv.writer(stream)
         writer.writerow(fields)
-        writer.writerow(["gdp", "2030", "unconditional", 50, "econ", 3, 1, 34, 34, 2])
+        writer.writerow(["gdp", "2030", "unconditional", 50, "superforecaster", 3, 1, 34, 34, 2])
     out = tmp_path / "summary.csv"
     out.write_text("previous summary")
     with pytest.raises(ValueError, match="Incomplete economic extract"):
         human.summarize(tmp_path, "2026-11-19", out)
     assert out.read_text() == "previous summary"
+
+
+def test_sparse_summary_keeps_available_cells(tmp_path):
+    row = human.load()[1][0]
+    summary = tmp_path / "human.csv"
+    summary.write_bytes(human.encode([row]))
+    assert human.load(summary) == (row["extracted_on"], [row])
+    summary.write_bytes(human.encode([]))
+    assert human.load(summary) == (None, [])
+    summary.write_bytes(human.encode([row, row]))
+    with pytest.raises(ValueError, match="duplicate"):
+        human.load(summary)
