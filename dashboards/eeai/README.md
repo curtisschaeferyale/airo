@@ -115,8 +115,7 @@ axis. Each tooltip row gives the forecast date. Human forecasts use the
 October 2025–February 2026 fieldwork period reported in the
 [study methods](https://forecastingresearch.org/research/economic-effects-of-ai).
 In the conditional view, hovering a scenario line reveals its elicited 80%
-interval where available. Open a headline question and scenarios panel or an
-indicator card for all forecast tables, the question definition and rationales.
+interval where available. Open any forecast card for all forecast tables, the question definition and rationales.
 
 Motion is small and optional: the modal fades in and out, the control just
 used presses in, and the forecasts (not the record or the axes) fade in when a

@@ -239,7 +239,7 @@ function hover(f, box, stops, rows, surveyStop = null) {
 }
 
 function drawChart(box, q, opts) {
-  if (!opts.target) { box.replaceChildren(h("p", { class: "empty" }, "No forecast targets in this window.")); return; }
+  if (!opts.target && opts.view === "history") { box.replaceChildren(h("p", { class: "empty" }, "No forecast targets in this window.")); return; }
   return opts.view === "history" ? drawHistory(box, q, opts) : drawTimeline(box, q, opts);
 }
 
@@ -250,9 +250,10 @@ function drawTimeline(box, q, opts) {
   const series = opts.split ? SCEN : [UNCOND];
   const history = q.history.map(([d, v]) => [yearOf(d), v, d]);
   const near = opts.term === "near";
-  const x0 = near ? Math.min(opts.referenceYear, history.filter(p => p[0] <= opts.referenceYear).at(-1)?.[0] ?? opts.referenceYear)
-    : hero ? 2000 : 2008;
-  const hist = history.filter(p => p[0] >= x0 && (!near || p[0] <= opts.referenceYear + 5));
+  const start = opts.size === "headline" ? 2000 : 2008;
+  const historyStart = history.length ? Math.min(Math.max(start, history[0][0]), history.at(-1)[0]) : opts.referenceYear;
+  const x0 = Math.min(historyStart, opts.referenceYear, ...horizons.map(z => +z.id));
+  const hist = history.filter(p => p[0] >= x0);
   const last = hist[hist.length - 1];
   const x1 = (near ? opts.referenceYear + 5 : Math.max(...horizons.map(z => +z.id), last ? last[0] : 0)) + (hero ? 0.6 : 0.8);
   const ys = hist.map(p => p[1]).concat(settled.map(z => z.actual.value));
@@ -265,7 +266,7 @@ function drawTimeline(box, q, opts) {
   if (!ys.length) { box.replaceChildren(h("p", { class: "empty" }, "No observations or forecasts in this window.")); return; }
   const f = frame(box, q, opts.size, x0, x1, ys), { svg, X, Y } = f;
   svg.setAttribute("aria-label", `${q.short}: historical outcomes and model forecasts. Human survey medians appear at surveyed horizons. Open the forecast details for values and respondent counts.`);
-  const step = near ? (x1 - x0 < 8 || hero ? 1 : 2) : x1 - x0 > 30 ? 10 : 5;
+  const step = [1, 2, 5, 10, 20, 50].find(n => (x1 - x0) / n <= (f.W - f.m.l - f.m.r) / 40) || 100;
   for (let yr = Math.ceil(x0 / step) * step; yr <= x1; yr += step) f.tick(yr, yr);
   const band = opts.split ? [] : ahead.filter(z => val(q, z.id, "unconditional", "p10") != null && val(q, z.id, "unconditional", "p90") != null);
   if (band.length && last) {

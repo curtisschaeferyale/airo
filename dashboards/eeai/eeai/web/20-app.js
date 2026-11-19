@@ -176,11 +176,11 @@ function headlines(questions) {
     controls("hero"), legend("80% range, where available", historyOf.has("hero"), questions),
     h("div", { class: "headline-grid" }, questions.map(q => {
       const [title, measure] = headlineMeasures[q.id], hz = horizonOf(q);
-      return h("article", { class: "tile headline" }, h("h3", {}, title), h("p", { class: "sub" }, measure),
+      return forecastCard(q, h("article", { class: "tile headline forecast-card" }, h("h3", {}, forecastTitle(title)), h("p", { class: "sub" }, measure),
         hz && !state.split && h("div", { class: "headline-values" },
           h("small", {}, "Model panel median"), h("b", { class: "mono" }, fmt(q, val(q, hz, "unconditional")))),
         hz && h("small", {}, q.id === "gdp" ? `${hz - 5}–${hz}` : `Beginning of ${hz}`),
-        chartBox(q, "headline"), forecastCard(q, h("div", { class: "well forecast-card" }, forecastTitle("The question and scenarios"))));
+        chartBox(q, "headline")));
     })));
 }
 
