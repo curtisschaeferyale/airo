@@ -15,7 +15,7 @@ const DATES = [...new Set(D.questions.flatMap(q => q.horizons.map(z => z.id)))].
 const said = new URLSearchParams(location.hash.slice(1));
 if (said.get("split") === "1") state.split = true;
 if (DATES.includes(said.get("horizon"))) state.horizon = said.get("horizon");
-const historyOf = new Set((said.get("history") || "").split(",").filter(a => a === "hero" || a === "grid"));
+const historyOf = new Set((D.latest ? said.get("history") || "" : "").split(",").filter(a => a === "hero" || a === "grid"));
 const remember = () => { try { history.replaceState(null, "", `#split=${state.split ? 1 : 0}&horizon=${state.horizon}`
   + (historyOf.size ? `&history=${[...historyOf].join(",")}` : "")); } catch (e) {} };
 const root = document.getElementById("root");
@@ -40,7 +40,7 @@ function seg(where, label, options, key, untitled) {
 function controls(where) {
   return h("div", { class: "controls" },
     seg(where, "Forecast shown", [[false, "Unconditional"], [true, "Conditional on AI progress"]], "split", true),
-    seg(where, "Horizon", DATES.map(d => [d, d]), "horizon"), viewToggle(where));
+    seg(where, "Horizon", DATES.map(d => [d, d]), "horizon"), D.latest && viewToggle(where));
 }
 // A chart area's own little toggle: the current forecast on the timeline, or that forecast's history.
 function viewToggle(where) {
@@ -60,7 +60,7 @@ function chartBox(q, size) {
 const horizonOf = q => q.horizons.some(z => z.id === state.horizon) ? state.horizon : q.horizons[q.horizons.length - 1].id;
 const unitWord = q => q.unit === "% per year" ? "per year" : q.unit.startsWith("%") ? q.unit.slice(1).trim() : q.unit;
 
-function legend(range, history) {
+function legend(range, history, questions) {
   const items = history ? [] : [h("span", { style: "color: var(--ink)" }, h("i", { class: "sw" }), h("span", {}, "Actual"))];
   if (state.split) for (const sc of SCEN) items.push(h("span", { style: `color: ${sc.color}` }, h("i", { class: "sw" }), h("span", { style: "color: var(--ink-soft)" }, sc.label)));
   else {
@@ -70,6 +70,12 @@ function legend(range, history) {
   if (history) {
     if (D.questions.some(q => q.horizons.some(z => z.id === state.horizon && z.actual))) items.push(h("span", { style: "color: var(--ink)" }, h("i", { class: "sw" }), h("span", {}, "Outcome")));
   } else if (D.questions.some(q => q.horizons.some(z => z.actual && z.asked))) items.push(h("span", {}, h("i", { class: "sw ring" }), "Forecast for a date whose outcome is in"));
+  if (questions.some(q => q.horizons.some(z => (history ? z.id === horizonOf(q) : +z.id <= +state.horizon)
+      && humanPoints(q, z.id, state.split ? SCEN : [UNCOND]).length))) {
+    for (const panel of HUMAN_PANELS) {
+      items.push(h("span", { class: "legend-" + panel.id }, h("i", { class: "survey-dot " + panel.id }), panel.label));
+    }
+  }
   return h("div", { class: "legend" }, items);
 }
 
@@ -85,6 +91,15 @@ function modelTable(q, hz) {
     h("thead", {}, h("tr", {}, h("th", {}, `${hz}`), h("th", {}, "Unconditional"), h("th", {}, "Slow"), h("th", {}, "Moderate"), h("th", {}, "Rapid"))),
     h("tbody", {},
       h("tr", {}, h("td", {}, h("b", {}, "Panel median")), cols.map(c => h("td", { class: "mono" }, ens(c)))),
+      HUMAN_PANELS.filter(panel => cols.some(sc => humanCell(q.id, hz, sc, panel.id))).map(panel =>
+        h("tr", {}, h("th", { scope: "row" }, panel.label), cols.map(sc => {
+          const at = stat => humanCell(q.id, hz, sc, panel.id, stat);
+          const median = at("p50");
+          if (!median) return h("td", {}, "–");
+          const lo = at("p10"), hi = at("p90");
+          return h("td", { class: "mono" }, withRange(q, Number(median.value), lo && Number(lo.value), hi && Number(hi.value))
+            + " (n=" + median.respondents + ")");
+        }))),
       q.models.map(m => h("tr", {}, h("td", {}, m.label), cols.map(c => h("td", { class: "mono" }, cell(m, c))))))));
 }
 const rationales = q => q.models.map(m => h("p", {}, h("span", { class: "who" }, m.label + ": "), m.rationale || "No rationale given."));
@@ -153,7 +168,7 @@ function hero(q) {
       delta != null
         ? h("div", { class: "stat" }, h("div", { class: "k" }, `Change since ${first.date}`), h("div", { class: "v mono " + (delta >= 0 ? "up" : "down") }, `${delta >= 0 ? "+" : "−"}${Math.abs(delta).toFixed(2)} pp`))
         : h("div", { class: "stat" }, h("div", { class: "k" }, "First asked"), h("div", { class: "v mono" }, first ? first.date : "–"))),
-    controls("hero"), legend(q.uncertainty && "Unconditional 80% range", history), chartBox(q, "hero"),
+    controls("hero"), legend(q.uncertainty && "Unconditional 80% range", history, [q]), chartBox(q, "hero"),
     h("div", { class: "well" },
       h("p", { class: "eyebrow" }, "The question"),
       h("p", {}, `${q.stem} ${q.horizons.find(z => z.id === hz).text} Each point is the annualized change over the five years before it, so every forecast is a later point on the same line. The survey asks about 2030 and 2050; the nearer dates are FRI's additions. When the record reaches a date, its forecast stays on the chart as a ring beside the outcome.`),
@@ -174,74 +189,25 @@ function tile(q) {
 }
 
 function progress() {
-  const p = D.part1; if (!p) return null;
-  const sp = p.scenario_probabilities, e = sp.ensemble;
+  const p = D.part1 || {}, models = D.latest?.models || [];
+  const sp = p.scenario_probabilities, e = sp?.ensemble;
   const pct = x => x == null ? "–" : Math.round(x) + "%";
+  const human = HUMAN_PANELS.filter(panel => humanCell("scenario_probabilities", "2030", "unconditional", panel.id, "probability", "slow"));
+  const humanProb = (q, option) => human.map(panel => {
+    const row = humanCell(q, "2030", "unconditional", panel.id, "probability", option);
+    return h("td", { class: "mono" }, row ? row.value + "% (n=" + row.respondents + ")" : "–");
+  });
   return h("section", { class: "card" }, h("h2", {}, "AI progress by 2030"),
-    h("p", { class: "sub" }, "How likely the models think each scenario is, and two capability milestones"),
+    h("p", { class: "sub" }, "Forecast probabilities for the three AI scenarios and two capability milestones"),
     e && h("div", { class: "bar", role: "img", "aria-label": `Slow ${pct(e.slow)}, moderate ${pct(e.moderate)}, rapid ${pct(e.rapid)}` },
       SCEN.map(sc => h("div", { style: `flex: ${e[sc.id]} 0 0; background: ${sc.color}`, title: `${sc.label}: ${pct(e[sc.id])}` }))),
     e && h("div", { class: "legend" }, SCEN.map(sc => h("span", {}, h("i", { class: "sw dot", style: `color: ${sc.color}` }), `${sc.label} ${pct(e[sc.id])}`))),
     h("div", { class: "scroll", style: "margin-top: 14px" }, h("table", { class: "tv" },
-      h("thead", {}, h("tr", {}, h("th", {}, "Probability"), h("th", {}, "Panel median"), D.latest.models.map(mo => h("th", {}, mo)))),
+      h("thead", {}, h("tr", {}, h("th", {}, "Probability"), h("th", {}, "Model panel"), human.map(panel => h("th", {}, panel.label)), models.map(mo => h("th", {}, mo)))),
       h("tbody", {},
-        SCEN.map(sc => h("tr", {}, h("td", {}, sc.label), h("td", { class: "mono" }, pct(e && e[sc.id])), D.latest.models.map(mo => h("td", { class: "mono" }, pct((sp.models[mo] || {})[sc.id]))))),
+        SCEN.map(sc => h("tr", {}, h("td", {}, sc.label), h("td", { class: "mono" }, pct(e && e[sc.id])), humanProb("scenario_probabilities", sc.id), models.map(mo => h("td", { class: "mono" }, pct((sp.models[mo] || {})[sc.id]))))),
         [["household_robot", "A household robot does four of five chores reliably"], ["reliability", "Frontier AI needs minimal oversight for most tasks"]].map(([id, text]) =>
-          h("tr", {}, h("td", {}, text), h("td", { class: "mono" }, pct(p[id].ensemble)), D.latest.models.map(mo => h("td", { class: "mono" }, pct(p[id].models[mo])))))))));
-}
-
-const cohortNames = { econ: "Economists", ai_expert: "AI experts", superforecaster: "Superforecasters", general_public: "General public" };
-
-let comparisonQuestion = "gdp", comparisonYear = "2030", comparisonCondition = "unconditional";
-
-function humanComparison() {
-  if (!D.human?.length) return null;
-  const section = h("section", { class: "card", id: "human-forecasts" });
-  const choices = [...D.questions.map(q => [q.id, q.short]), ["scenario_probabilities", "AI progress scenarios"],
-    ["household_robot", "Household robot milestone"], ["reliability", "AI reliability milestone"]];
-  let question = comparisonQuestion, year = comparisonYear, condition = comparisonCondition;
-  const inputs = h("div", { class: "controls" }), results = h("div", { class: "scroll", "aria-live": "polite" });
-  function select(label, choices, current, update) {
-    const control = h("select", { "aria-label": label, onchange: ev => update(ev.target.value) },
-      choices.map(([id, name]) => h("option", { value: id }, name)));
-    control.value = current;
-    return h("label", {}, label + " ", control);
-  }
-  function show(focus) {
-    const rows = D.human.filter(r => r.question === question);
-    const q = D.questions.find(q => q.id === question);
-    const years = [...new Set(rows.map(r => r.horizon))].sort();
-    if (!years.includes(year)) year = years[0];
-    const scenarios = [UNCOND, ...SCEN].filter(s => rows.some(r => r.condition === s.id && r.horizon === year));
-    if (!scenarios.some(s => s.id === condition)) condition = scenarios[0].id;
-    inputs.replaceChildren(select("Question", choices, question, v => { question = v; show("Question"); }),
-      select("Horizon", years.map(y => [y,y]), year, v => { year = v; show("Horizon"); }));
-    if (q) inputs.append(select("Scenario", scenarios.map(s => [s.id,s.label]), condition, v => { condition = v; show("Scenario"); }));
-    const cells = rows.filter(r => r.horizon === year && r.condition === condition);
-    const fields = q ? ["p10","p50","p90"].filter(k => cells.some(r => r.elicited_statistic === k))
-      : question === "scenario_probabilities" ? SCEN.map(s => s.id) : ["true"];
-    const header = k => q ? k.toUpperCase() : k === "true" ? "Probability" : SCEN.find(s => s.id === k).label;
-    const format = v => v == null ? "–" : q ? fmt(q, Number(v)) : Number(v).toFixed(1) + "%";
-    const panel = k => q ? val(q, year, condition, k) : k === "true" ? D.part1?.[question]?.ensemble : D.part1?.[question]?.ensemble?.[k];
-    results.replaceChildren(h("table", { class: "tv" },
-      h("thead", {}, h("tr", {}, h("th", {}, q ? "Forecasters · " + q.unit : "Forecasters"), fields.map(k => h("th", {}, header(k))))),
-      h("tbody", {}, D.latest && h("tr", {}, h("th", { scope: "row" }, "Model panel"), fields.map(k => h("td", {}, format(panel(k))))),
-        Object.entries(cohortNames).map(([id, name]) => h("tr", {}, h("th", { scope: "row" }, name),
-          fields.map(k => {
-            const r = cells.find(r => r.cohort === id && (q ? r.elicited_statistic : r.option) === k);
-            return h("td", {}, r ? format(r.value) + " (n=" + r.respondents + ")" : "–");
-          }))))));
-    comparisonQuestion = question;
-    comparisonYear = year;
-    comparisonCondition = condition;
-    if (focus) inputs.querySelector('[aria-label="' + focus + '"]').focus({preventScroll:true});
-  }
-  show();
-  section.append(h("h2", {}, "Human forecasts"), h("p", { class: "sub" },
-    "Compare the original survey cohorts with the model panel. Economic values are within-group weighted medians for each elicited percentile. Probabilities are weighted means. Each count is the number of respondents."),
-    inputs, results, h("p", { class: "meta" }, "Original EEAI survey · Warehouse extract " + D.human_extracted_on + " · ",
-      h("a", { href: "https://forecastingresearch.org/research/economic-effects-of-ai" }, "Survey methodology")));
-  return section;
+          h("tr", {}, h("td", {}, text), h("td", { class: "mono" }, pct(p[id]?.ensemble)), humanProb(id, "true"), models.map(mo => h("td", { class: "mono" }, pct(p[id].models[mo])))))))));
 }
 
 function download() {
@@ -257,7 +223,7 @@ function render() {
   root.style.minHeight = root.offsetHeight + "px";
   root.classList.remove("still");
   const gdp = D.questions.find(q => q.id === "gdp"), rest = D.questions.filter(q => q.id !== "gdp");
-  const L = D.latest;
+  const L = D.latest, hasForecasts = Boolean(L || D.human?.length);
   // replaceChildren would print a `false` as text, so the absent sections are filtered out.
   root.replaceChildren(...[
     h("header", {},
@@ -269,14 +235,13 @@ function render() {
       L && h("p", { class: "meta" }, `Latest run ${L.date} · ${L.models.join(", ")} · each model searches the web before answering`),
       D.synthetic && h("div", { class: "banner", role: "status" }, h("b", {}, "Placeholder data. "), "These numbers are made up to show the layout. No model has been asked yet.")),
     !L && h("section", { class: "card" }, h("h2", {}, "No model forecasts yet"), h("p", { class: "empty" }, "The panel has not been asked. The questions are ready; the first run will fill this page.")),
-    L && gdp && hero(gdp),
-    humanComparison(),
-    L && h("section", { class: "card" }, h("h2", {}, "The other indicators"),
+    hasForecasts && gdp && hero(gdp),
+    hasForecasts && h("section", { class: "card" }, h("h2", {}, "The other indicators"),
       h("p", { class: "sub" }, `The survey's 14 other questions. Each panel has its own scale; ` + (historyOf.has("grid")
         ? `the line is the panel's forecast for ${state.horizon}, each time it was asked.`
-        : `the line is the record, the dots are the panel's medians for each date asked, out to ${state.horizon}.`)),
-      controls("grid"), legend("80% range, where the survey asks for one", historyOf.has("grid")), h("div", { class: "grid" }, rest.map(tile))),
-    L && progress(),
+        : `dots show model and human forecasts at their target dates, out to ${state.horizon}.`)),
+      controls("grid"), legend("80% range, where the survey asks for one", historyOf.has("grid"), rest), h("div", { class: "grid" }, rest.map(tile))),
+    hasForecasts && progress(),
     D.download && h("section", { class: "card" }, h("div", { class: "head" },
       h("div", {}, h("h2", {}, "Download data"),
         h("p", { class: "sub", style: "color: var(--ink-soft); margin: 4px 0 0; max-width: 640px" }, "Every forecast from every model in every run, each model's rationale, the questions, and the run files with every search and page read.")),

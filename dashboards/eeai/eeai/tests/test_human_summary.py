@@ -32,7 +32,7 @@ def test_truncated_private_input_preserves_previous_summary(tmp_path):
     with path.open("w") as stream:
         writer = csv.writer(stream)
         writer.writerow(fields)
-        writer.writerow(["gdp", "2030", "unconditional", 50, "econ", 3, 1, 34, 34, 2])
+        writer.writerow(["gdp", "2030", "unconditional", 50, "superforecaster", 3, 1, 34, 34, 2])
     out = tmp_path / "summary.csv"
     out.write_text("previous summary")
     with pytest.raises(ValueError, match="Incomplete economic extract"):

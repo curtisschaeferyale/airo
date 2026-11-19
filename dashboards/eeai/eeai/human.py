@@ -11,7 +11,7 @@ from dashboard.download import csv_text
 from . import config, survey
 
 SUMMARY = config.DATA / "human_forecasts.csv"
-COHORTS = ("econ", "ai_expert", "superforecaster", "general_public")
+COHORTS = ("superforecaster", "full_panel")
 CELL = ("question", "horizon", "condition", "elicited_statistic", "option", "cohort")
 FIELDS = (*CELL, "value", "respondents", "extracted_on")
 ALIASES = {"whitecollar": "jobs_business_analytical", "bluecollar": "jobs_skilled_trade_industrial",
@@ -21,7 +21,7 @@ PROGRESS = {"ai_progress_scenario": "scenario_probabilities", "physical_systems"
 
 
 def display_cells():
-    """The original survey cells and the precision shown in the comparison table."""
+    """The original survey cells and the precision shown in the forecast charts and details."""
     cells = {}
     for q in survey.load()["questions"]:
         for horizon in q["horizons"]:

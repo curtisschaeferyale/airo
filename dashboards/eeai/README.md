@@ -202,12 +202,15 @@ guide and requires FRED access from the scheduled runtime.
 
 ## Human survey forecasts
 
-The Human forecasts section compares the original survey's economist, AI expert,
-superforecaster, and general public cohorts with the latest available panel
-values. Each economic cell uses the first reported value at which cumulative
-within-group weight reaches 50%. Each probability uses a weighted mean.
-Respondent counts apply to individual cells. Warehouse-derived medians can
-differ from the paper's rounded estimates.
+Economic charts show two survey medians at each horizon and scenario that
+humans answered. The larger filled dot shows superforecasters with their
+survey weights. The smaller hollow dot shows the full human panel, including
+superforecasters, with one vote per eligible respondent. Both use the lower
+median at an exact half-weight tie. Horizontal spacing keeps equal values
+visible at the same horizon. The run-history chart gives the original survey
+its own labeled position. Forecast details include counts and elicited ranges.
+The AI progress probability table uses the same two panels and their respective
+weighted and equal-weight means.
 
 The build reads `eeai/data/human_forecasts.csv`. The page and the download
 use the same rounded values and respondent counts. Git retains the history
