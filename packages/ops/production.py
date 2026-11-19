@@ -15,6 +15,7 @@ import socket
 from socketserver import ThreadingUnixStreamServer
 import subprocess
 import sys
+import time
 import uuid
 import zipfile
 
@@ -381,7 +382,7 @@ class Runtime:
             removed = self.prune_locked()
         print(json.dumps({'removed': removed, 'storage': self.storage_status()}, indent=2))
 
-    def merged_sha(self, requested=None):
+    def merged_sha(self, requested=None, *, wait=False):
         if not self.mirror.exists():
             run(['git', 'clone', '--bare', self.config['repository'], self.mirror])
         run(['git', '-C', self.mirror, 'fetch', 'origin', '+refs/heads/main:refs/heads/main'])
@@ -389,15 +390,21 @@ class Runtime:
         if not re.fullmatch(r'[0-9a-f]{40}', sha):
             raise ValueError('Expected a full commit SHA')
         run(['git', '-C', self.mirror, 'merge-base', '--is-ancestor', sha, 'main'])
-        checks = json.loads(output(['gh', 'api', f"repos/{self.config['github_repository']}/commits/{sha}/check-runs?per_page=100"]))['check_runs']
-        # GitHub returns newest first. A newer failure must not be hidden by an old pass.
-        latest = {}
-        for check in sorted(checks, key=lambda x: x['id'], reverse=True):
-            if check.get('app', {}).get('slug') == 'github-actions':
-                latest.setdefault(check['name'], check)
-        failed = [name for name in REQUIRED_CHECKS if name not in latest or latest[name]['status'] != 'completed' or latest[name]['conclusion'] != 'success']
-        if failed:
-            raise RuntimeError('Required checks have not passed for this commit: ' + ', '.join(sorted(failed)))
+        deadline = time.monotonic() + 1800
+        while True:
+            checks = json.loads(output(['gh', 'api', f"repos/{self.config['github_repository']}/commits/{sha}/check-runs?per_page=100"]))['check_runs']
+            # GitHub returns newest first. A newer failure must not be hidden by an old pass.
+            latest = {}
+            for check in sorted(checks, key=lambda x: x['id'], reverse=True):
+                if check.get('app', {}).get('slug') == 'github-actions':
+                    latest.setdefault(check['name'], check)
+            failed = [name for name in REQUIRED_CHECKS if name not in latest or latest[name]['status'] != 'completed' or latest[name]['conclusion'] != 'success']
+            if not failed:
+                break
+            terminal = any(latest[name]['status'] == 'completed' for name in failed if name in latest)
+            if not wait or terminal or time.monotonic() >= deadline:
+                raise RuntimeError('Required checks have not passed for this commit: ' + ', '.join(sorted(failed)))
+            time.sleep(15)
         return sha
 
     def stage_data(self, code, copy_results=True):
@@ -505,21 +512,33 @@ class Runtime:
                 raise RuntimeError('Selected site differs from its recorded snapshot')
             self.publish_public(site)
 
-    def activate(self, release):
+    def activate(self, release, *, verify=False):
+        receipt = {}
         previous = self.current.resolve() if self.current.exists() else None
         link(release, self.current)
         try:
             self.probe(release)
             self.publish_public(release / 'site')
+            if verify:
+                meta = self.release_metadata(release)
+                report = eeai_operator.check_public(self.config, release / 'site', meta, content=True)
+                if report['result'] != 'verified':
+                    raise RuntimeError(f"Public verification failed: {report['result']}")
+                receipt = dict(verified=True, public_url=report['url'], frontend_commit=meta['frontend_commit'],
+                               data_snapshot_sha256=meta['data_snapshot']['sha256'])
         except Exception:
             if previous:
                 link(previous, self.current)
+                if verify:
+                    self.publish_public(previous / 'site')
             else:
                 self.current.unlink()
             raise
         if previous and previous != release:
             link(previous, self.root / 'previous')
-        write_json(self.root / 'last-deploy.json', {'release': release.name, 'previous': previous.name if previous else None, 'at': datetime.now(timezone.utc).isoformat()})
+        write_json(self.root / 'last-deploy.json', {**receipt, 'release': release.name, 'previous': previous.name if previous else None, 'at': datetime.now(timezone.utc).isoformat()})
+
+        return receipt
 
     def publish_frontend(self, code, site):
         if not self.current.exists():
@@ -569,9 +588,11 @@ class Runtime:
             raise RuntimeError('Candidate predates multi-dashboard deployment')
         return script if 'build-release' in usage else None
 
-    def deploy(self, requested=None, keep_publication=False, publish_data=False):
+    def deploy(self, requested=None, keep_publication=False, publish_data=False, wait=False):
         if keep_publication and publish_data:
             raise ValueError('Choose either preserved publication or new data publication')
+        if wait:
+            requested = self.merged_sha(requested, wait=True)
         with self.lock():
             self.prune_locked()
             self.require_space(publish_data=publish_data)
@@ -586,7 +607,9 @@ class Runtime:
                 script = self.builder(code)
                 if script:
                     run([sys.executable, script, '--config', self.config_path, 'build-release', '--release', name, '--commit', sha,
-                         *(['--keep-publication'] if keep_publication else []), *(['--publish-data'] if publish_data else [])])
+                         *(['--wait'] if wait else []), *(['--keep-publication'] if keep_publication else []), *(['--publish-data'] if publish_data else [])])
+                elif wait:
+                    raise RuntimeError('Candidate does not support verified deployment')
                 else:   # a commit from before releases built themselves
                     self.build_release(name, sha, keep_publication=keep_publication, publish_data=publish_data)
             except Exception:
@@ -594,7 +617,7 @@ class Runtime:
                 write_json(release / 'failed.json', {'at': datetime.now(timezone.utc).isoformat()})
                 raise
 
-    def build_release(self, name, sha, keep_publication=False, publish_data=False):
+    def build_release(self, name, sha, keep_publication=False, publish_data=False, wait=False):
         """Install, publish and activate the checked-out release `name`. Called
         by deploy, which holds operation.lock (in the live release's process
         when this is the candidate's)."""
@@ -644,12 +667,12 @@ class Runtime:
         link(site, release / 'site')
         write_json(release / 'release.json', metadata)
         self.attach_state(code)
-        self.activate(release)
+        receipt = self.activate(release, verify=True) if wait else self.activate(release)
         try:
             self.prune_locked()
         except (OSError, RuntimeError) as exc:
             print(f'Retention needs attention: {exc}', file=sys.stderr)
-        print(json.dumps({'deployed': name, 'commit': sha}))
+        print(json.dumps({'deployed': name, 'commit': sha, **(receipt or {})}))
 
     def rollback(self):
         with self.lock():
@@ -733,7 +756,7 @@ class Runtime:
                 # Keep the invoking service's bypass semantics for the FRED fetch.
                 fred_env = {k: v for k, v in env.items() if k not in ('NO_PROXY', 'no_proxy')}
                 fred_env.update({k: os.environ[k] for k in ('NO_PROXY', 'no_proxy') if k in os.environ})
-                run([code / '.venv/bin/python', '-m', 'eeai', 'refresh'],
+                run([code / '.venv/bin/python', *self.dashboard.refresh],
                     cwd=code / self.dashboard.project, env=fred_env, stdout=log, stderr=subprocess.STDOUT)
                 set_stage('build')
                 self.build_data(code, site, env, stdout=log, stderr=subprocess.STDOUT)
@@ -755,7 +778,7 @@ class Runtime:
             release = self.current.resolve(strict=True)
             code = release / 'code'
             started = {'key': key, 'job': job['id'], 'release': release.name, 'status': 'running', 'started': datetime.now(timezone.utc).isoformat()}
-            refresh = job['kind'] == 'refresh'
+            refresh = self.name == 'eeai' and job['kind'] == 'refresh'
             if refresh:
                 started.update(kind='refresh', stage='preflight')
                 if retry:
@@ -808,9 +831,9 @@ class Runtime:
                         if self.panel_runtime:
                             primary = self.panel_runtime
                             primary_code = primary.current.resolve(strict=True) / 'code'
-                            refresh = primary_code / AIRO / 'code/refresh_panel.sh'
+                            panel_refresh = primary_code / AIRO / 'code/refresh_panel.sh'
                             try:
-                                run(['bash', refresh], cwd=refresh.parent.parent,
+                                run(['bash', panel_refresh], cwd=panel_refresh.parent.parent,
                                     env=primary.environment(primary_code, primary.root / 'tmp'),
                                     stdout=log, stderr=subprocess.STDOUT)
                             finally:
@@ -1098,6 +1121,7 @@ def main():
     parser.add_argument('--upload-prefix', help='configure-forecastbench: gs://bucket/team-prefix/binary; key JSON on stdin')
     parser.add_argument('--due', help='check-forecastbench-upload: round folder date for a .txt access probe')
     parser.add_argument('--commit')
+    parser.add_argument('--wait', action='store_true', help='EEAI deploy: wait for required checks and verify the served release')
     parser.add_argument('--release', help='build-release only (deploy runs it in the candidate): the checked-out release to build')
     publication = parser.add_mutually_exclusive_group()
     publication.add_argument('--keep-publication', action='store_true', help='Retain the entire website while deploying code and schedules')
@@ -1107,6 +1131,8 @@ def main():
     parser.add_argument('--retry', metavar='RUN_ID', help='refresh: retry publication of a failed verified-refresh candidate')
     args = parser.parse_args()
     config = json.loads(Path(args.config).read_text())
+    if args.wait and (config.get('dashboard') != 'eeai' or args.command not in ('deploy', 'build-release')):
+        parser.error('--wait applies to EEAI deployment only')
     if args.command in ('doctor', 'refresh') and config.get('dashboard') != 'eeai':
         parser.error('This operator command is available only for EEAI')
     if args.command == 'refresh' and not args.verify:
@@ -1115,8 +1141,8 @@ def main():
         parser.error('--verify and --retry apply to EEAI refresh')
     read_only = config.get('dashboard') == 'eeai' and args.command in ('doctor', 'status')
     runtime = Runtime(config, config_path=args.config, read_only=read_only)
-    if args.command == 'deploy': runtime.deploy(args.commit, keep_publication=args.keep_publication, publish_data=args.publish_data)
-    elif args.command == 'build-release': runtime.build_release(args.release, args.commit, keep_publication=args.keep_publication, publish_data=args.publish_data)
+    if args.command == 'deploy': runtime.deploy(args.commit, keep_publication=args.keep_publication, publish_data=args.publish_data, wait=args.wait)
+    elif args.command == 'build-release': runtime.build_release(args.release, args.commit, keep_publication=args.keep_publication, publish_data=args.publish_data, wait=args.wait)
     elif args.command == 'run-dashboard':
         if not args.run_id:
             parser.error('run-dashboard requires --run-id')

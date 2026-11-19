@@ -339,3 +339,10 @@ job is daily at 15:15 UTC. Set `daily_utc`, `weekly_utc` or `at` to override
 it. The command reads source evidence and saves outcomes. The scheduler then
 rebuilds and verifies the page using the dashboard's existing forecast runs.
 EEAI's command also refreshes its historical baseline.
+
+For EEAI, run `dashboardctl eeai deploy --commit SHA --wait` from the production
+runtime. It pins the merged commit and waits up to 30 minutes for its required
+checks before acquiring the deployment lock. The normal deployment uses the
+existing data snapshot. It compares the public release metadata, homepage and
+download with the candidate and prints the verified URL, frontend commit and
+snapshot SHA-256. A failed public check restores the previous publication.

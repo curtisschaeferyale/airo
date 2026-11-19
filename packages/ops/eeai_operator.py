@@ -150,6 +150,9 @@ def tick_command(unit):
     if not start or unit.get('LoadState') != 'loaded':
         return None, False
     executable, argv = start.groups()
+    args = argv.split()
+    if executable in ('/usr/bin/python3', '/usr/local/bin/python3') and len(args) == 3 and args[0] == executable:
+        executable, argv = args[1], ' '.join(args[1:])
     eligible = Path(executable).name == 'dashboardctl' and argv.split() == [executable, 'tick-all']
     return [executable, 'tick-all' if eligible else '[arguments omitted]'], eligible
 
