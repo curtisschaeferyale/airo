@@ -199,3 +199,29 @@ guide and requires FRED access from the scheduled runtime.
   version, and a new series.
 - The AI electricity question points to an embedded document the survey's
   respondents could open and the models cannot.
+
+## Human survey forecasts
+
+The Human forecasts section compares the original survey's economist, AI expert,
+superforecaster, and general public cohorts with the latest available panel
+values. Each economic cell uses the first reported value at which cumulative
+within-group weight reaches 50%. Each probability uses a weighted mean.
+Respondent counts apply to individual cells. Warehouse-derived medians can
+differ from the paper's rounded estimates.
+
+Run the two SQL files under `eeai/warehouse/` against the EEAI production
+warehouse with standard SQL. Save their grouped results as `economic.csv` and
+`probabilities.csv` in a private directory. With bq, set the warehouse project
+explicitly and pass `--format=csv` and `--max_rows=5000`. From this directory:
+
+```bash
+python3 -m eeai import-human "$EXTRACT_DIR" --extracted-on "$EXTRACT_DATE"
+python3 -m eeai build
+```
+
+Keep extracts outside git. The importer checks coverage and writes a dated,
+immutable CSV under `EEAI_RESULTS/human_forecasts`. Reimporting identical data
+for the same date is safe. The site build reads the newest snapshot, including
+when building from stored model runs. The download includes the same cohort
+records, with source targets, survey wave, aggregation method, respondent count,
+and SHA-256 of each source extract. Builds without a snapshot omit the comparison.

@@ -198,6 +198,14 @@ def main(args):
     history = S.read_history(io.StringIO(history_bytes.decode()))
     blob = build(survey, history=history, runs=runs, outcomes=outcomes)
     blob["outcome_snapshot_id"] = snapshot_id
+    from dashboard import human_forecasts
+    vintage, human = human_forecasts.latest(config.RESULTS / "human_forecasts")
+    if any(r["instrument"] != survey["instrument"] or r["project"] != "eeai" for r in human):
+        raise ValueError("Human forecast snapshot does not match the EEAI instrument")
+    blob["human"] = human
+    blob["human_extracted_on"] = vintage
+    if human:
+        blob["download"] = export.NAME
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -209,8 +217,8 @@ def main(args):
         from dashboard import site as kit
         out = kit.write_site(Path(args.site) if args.site else config.SITE, page(blob),
                              assets={f"web/{sub}": config.PAGE_DIR / sub for sub in ("img", "fonts")}) / "index.html"
-    if runs:
-        export.bundle(out.with_name(export.NAME), survey, runs, args.runs, outcomes, history_bytes)
+    if runs or human:
+        export.bundle(out.with_name(export.NAME), survey, runs, args.runs, outcomes, history_bytes, human=human, vintage=vintage)
     if args.json:
         Path(args.json).write_text(json.dumps(blob, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"{out}: {len(runs)} run(s), {len(blob['questions'])} questions"
