@@ -52,6 +52,12 @@ def unit_properties(unit, properties):
         key, value = line.split('=', 1)
         values[key] = (' '.join(filter(None, [values.get(key), value]))
                        if key == 'EnvironmentFiles' else value)
+    if 'EnvironmentFiles' in properties and 'EnvironmentFiles' not in values and values.get('LoadState') == 'loaded':
+        # Some systemd versions omit an empty EnvironmentFiles array even with --all.
+        # Confirm that neither the installed unit nor a drop-in declares one.
+        unit_text, _ = command_result(['systemctl', 'cat', '--', unit])
+        if unit_text and not re.search(r'^\s*EnvironmentFile\s*=', unit_text, re.M):
+            values['EnvironmentFiles'] = ''
     return values
 
 
