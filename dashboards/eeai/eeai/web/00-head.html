@@ -74,7 +74,7 @@
   .up { color: var(--accent-orange); } .down { color: var(--uncond); }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 16px; color: var(--ink-soft); font-size: 13.5px; }
   .legend span { display: inline-flex; align-items: center; gap: 7px; }
-  .survey-dot { display: inline-block; width: 8px; height: 8px; border: 1.5px solid currentColor; border-radius: 50%; }
+  .survey-dot { display: inline-block; width: 17px; height: 17px; border: 1.5px solid currentColor; border-radius: 50%; }
   .survey-dot.superforecaster { width: 11px; height: 11px; border: 2px solid var(--ink); background: var(--uncond); }
   .legend-superforecaster { font-weight: 600; color: var(--ink); }
   .sw { display: inline-block; width: 18px; height: 0; border-top: 2.5px solid currentColor; }
@@ -86,9 +86,9 @@
   .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
   .chart text { font-family: "Season Sans", system-ui, sans-serif; fill: var(--ink-faint); font-size: 12px; }
   .chart text.end { fill: var(--ink); font-size: 12.5px; }
-  .tip { position: absolute; pointer-events: none; background: var(--ink); color: #fff; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45; white-space: nowrap; z-index: 5; box-shadow: var(--shadow); }
-  .tip .who { display: grid; gap: 1px 14px; margin-top: 3px; justify-items: end; }
-  .tip .who > :nth-child(1), .tip .who i:not(:has(u)) { justify-self: start; }
+  .tip { box-sizing: border-box; max-width: 100%; position: absolute; pointer-events: none; background: var(--ink); color: #fff; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45; z-index: 5; box-shadow: var(--shadow); }
+  .tip .who { display: grid; gap: 2px 8px; margin-top: 3px; text-align: right; justify-items: end; }
+  .tip .who > :first-child, .tip .who > i:not(:has(u)), .tip .who > b:not(.mono) { justify-self: start; text-align: left; }
   .tip .who b { font-weight: 600; }
   .tip .who u { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; text-decoration: none; }
   .tip b { font-weight: 600; } .tip .row { display: flex; gap: 12px; justify-content: space-between; } .tip i { font-style: normal; opacity: .75; }

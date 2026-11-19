@@ -66,9 +66,12 @@ def load(path=SUMMARY):
         if reader.fieldnames != list(FIELDS):
             raise ValueError("Unexpected public cohort summary columns")
         rows = list(reader)
+    if not rows:
+        return None, []
     cells = display_cells()
-    if len(rows) != len(cells) or {tuple(r[k] for k in CELL) for r in rows} != cells.keys():
-        raise ValueError("Public cohort summary has missing, unknown or duplicate cells")
+    keys = {tuple(r[k] for k in CELL) for r in rows}
+    if len(rows) != len(keys) or not keys <= cells.keys():
+        raise ValueError("Public cohort summary has unknown or duplicate cells")
     dates = {date.fromisoformat(r["extracted_on"]).isoformat() for r in rows}
     if len(dates) != 1:
         raise ValueError("Expected a single cohort extract date")
@@ -120,19 +123,19 @@ def summarize(directory, extracted_on, out=SUMMARY):
                 if respondents < 2 or counts.setdefault(key, respondents) != respondents:
                     raise ValueError(f"Invalid cohort count for {key}")
                 distributions[key].append((value, weight * frequency))
-            if length != expected_length:
+            if expected_length is not None and length != expected_length:
                 raise ValueError(f"Incomplete {kind} extract")
-    if distributions.keys() != cells.keys():
-        raise ValueError("Missing survey cells")
     rows = []
-    scenario_totals = defaultdict(Decimal)
+    scenario_values = defaultdict(list)
     for key, places in cells.items():
+        if key not in distributions:
+            continue
         value = aggregate(distributions[key], probability=key[3] == "probability")
         if key[0] == "scenario_probabilities":
-            scenario_totals[key[-1]] += value
+            scenario_values[key[-1]].append(value)
         rows.append(dict(zip(CELL, key, strict=True), value=display_value(value, places),
                          respondents=str(counts[key]), extracted_on=vintage))
-    if any(abs(total - 100) > Decimal("0.000001") for total in scenario_totals.values()):
+    if any(abs(sum(values) - 100) > Decimal("0.000001") for values in scenario_values.values() if len(values) == 3):
         raise ValueError("Scenario probabilities do not sum to 100")
     out = Path(out)
     with NamedTemporaryFile(dir=out.parent, delete=False) as tmp:

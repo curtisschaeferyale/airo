@@ -15,7 +15,7 @@ const DATES = [...new Set(D.questions.flatMap(q => q.horizons.map(z => z.id)))].
 const said = new URLSearchParams(location.hash.slice(1));
 if (said.get("split") === "1") state.split = true;
 if (DATES.includes(said.get("horizon"))) state.horizon = said.get("horizon");
-const historyOf = new Set((D.latest ? said.get("history") || "" : "").split(",").filter(a => a === "hero" || a === "grid"));
+const historyOf = new Set((said.get("history") || "").split(",").filter(a => a === "hero" || a === "grid"));
 const remember = () => { try { history.replaceState(null, "", `#split=${state.split ? 1 : 0}&horizon=${state.horizon}`
   + (historyOf.size ? `&history=${[...historyOf].join(",")}` : "")); } catch (e) {} };
 const root = document.getElementById("root");
@@ -40,7 +40,7 @@ function seg(where, label, options, key, untitled) {
 function controls(where) {
   return h("div", { class: "controls" },
     seg(where, "Forecast shown", [[false, "Unconditional"], [true, "Conditional on AI progress"]], "split", true),
-    seg(where, "Horizon", DATES.map(d => [d, d]), "horizon"), D.latest && viewToggle(where));
+    seg(where, "Horizon", DATES.map(d => [d, d]), "horizon"), viewToggle(where));
 }
 // A chart area's own little toggle: the current forecast on the timeline, or that forecast's history.
 function viewToggle(where) {
@@ -70,28 +70,33 @@ function legend(range, history, questions) {
   if (history) {
     if (D.questions.some(q => q.horizons.some(z => z.id === state.horizon && z.actual))) items.push(h("span", { style: "color: var(--ink)" }, h("i", { class: "sw" }), h("span", {}, "Outcome")));
   } else if (D.questions.some(q => q.horizons.some(z => z.actual && z.asked))) items.push(h("span", {}, h("i", { class: "sw ring" }), "Forecast for a date whose outcome is in"));
-  if (questions.some(q => q.horizons.some(z => (history ? z.id === horizonOf(q) : +z.id <= +state.horizon)
-      && humanPoints(q, z.id, state.split ? SCEN : [UNCOND]).length))) {
-    for (const panel of HUMAN_PANELS) {
-      items.push(h("span", { class: "legend-" + panel.id }, h("i", { class: "survey-dot " + panel.id }), panel.label));
-    }
+  const series = state.split ? SCEN : [UNCOND];
+  for (const panel of HUMAN_PANELS) {
+    const available = questions.some(q => q.horizons.some(z => (history ? z.id === horizonOf(q) : +z.id <= +state.horizon)
+      && series.some(sc => humanCell(q.id, z.id, sc.id, panel.id))));
+    if (available) items.push(h("span", { class: "legend-" + panel.id }, h("i", { class: "survey-dot " + panel.id }), panel.label));
   }
   return h("div", { class: "legend" }, items);
 }
 
 function modelTable(q, hz) {
-  const cell = (m, sc) => {
-    const c = ((m.forecasts[hz] || {})[sc] || {});
+  const cell = (forecasts, sc) => {
+    const c = forecasts[hz]?.[sc] || {};
     return c.p50 == null ? "–" : fmt(q, c.p50) + (c.p10 != null && c.p90 != null ? ` (${fmt(q, c.p10, true)} to ${fmt(q, c.p90, true)})` : "");
   };
   const ens = sc => { const p10 = val(q, hz, sc, "p10"), p90 = val(q, hz, sc, "p90");
     return fmt(q, val(q, hz, sc)) + (p10 != null && p90 != null ? ` (${fmt(q, p10, true)} to ${fmt(q, p90, true)})` : ""); };
   const cols = ["unconditional", "slow", "moderate", "rapid"];
+  const modelRows = Object.entries(runFor(q, hz).models || {}).filter(([, forecasts]) =>
+    cols.some(sc => forecasts[hz]?.[sc]?.p50 != null));
+  const panels = HUMAN_PANELS.filter(panel => cols.some(sc => humanCell(q.id, hz, sc, panel.id)));
+  const hasMedian = cols.some(sc => val(q, hz, sc) != null);
+  if (!hasMedian && !modelRows.length && !panels.length) return null;
   return h("div", { class: "scroll" }, h("table", { class: "tv" },
     h("thead", {}, h("tr", {}, h("th", {}, `${hz}`), h("th", {}, "Unconditional"), h("th", {}, "Slow"), h("th", {}, "Moderate"), h("th", {}, "Rapid"))),
     h("tbody", {},
-      h("tr", {}, h("td", {}, h("b", {}, "Panel median")), cols.map(c => h("td", { class: "mono" }, ens(c)))),
-      HUMAN_PANELS.filter(panel => cols.some(sc => humanCell(q.id, hz, sc, panel.id))).map(panel =>
+      hasMedian && h("tr", {}, h("td", {}, h("b", {}, "Model panel median")), cols.map(c => h("td", { class: "mono" }, ens(c)))),
+      panels.map(panel =>
         h("tr", {}, h("th", { scope: "row" }, panel.label), cols.map(sc => {
           const at = stat => humanCell(q.id, hz, sc, panel.id, stat);
           const median = at("p50");
@@ -100,12 +105,12 @@ function modelTable(q, hz) {
           return h("td", { class: "mono" }, withRange(q, Number(median.value), lo && Number(lo.value), hi && Number(hi.value))
             + " (n=" + median.respondents + ")");
         }))),
-      q.models.map(m => h("tr", {}, h("td", {}, m.label), cols.map(c => h("td", { class: "mono" }, cell(m, c))))))));
+      modelRows.map(([label, forecasts]) => h("tr", {}, h("td", {}, label), cols.map(c => h("td", { class: "mono" }, cell(forecasts, c))))))));
 }
 const rationales = q => q.models.map(m => h("p", {}, h("span", { class: "who" }, m.label + ": "), m.rationale || "No rationale given."));
 // Each date whose outcome is in: the outcome, and every forecast with its miss.
 function outcomes(q) {
-  const cols = [UNCOND].concat(SCEN), rows = q.horizons.filter(z => z.actual && cols.some(c => val(q, z.id, c.id) != null));
+  const cols = [UNCOND].concat(SCEN), rows = q.horizons.filter(z => z.actual);
   if (!rows.length) return null;
   const cell = (z, c, outcome, latest) => {
     const v = val(q, z.id, c.id);
@@ -134,7 +139,10 @@ function forecastCard(q, card) {
   const trigger = card.querySelector(".forecast-trigger");
   return forecastDialog.bind(card, trigger, opener => {
     const views = [
-      ["Forecasts", body => body.append(...q.horizons.map(z => modelTable(q, z.id)))],
+      ["Forecasts", body => {
+        const tables = q.horizons.map(z => modelTable(q, z.id)).filter(Boolean);
+        body.append(...(tables.length ? tables : ["No forecasts recorded yet."]));
+      }],
       ["Definition", body => body.append(...defined(q).filter(Boolean))],
       ["Rationales", body => body.append(...rationales(q))]
     ];
@@ -192,7 +200,7 @@ function progress() {
   const p = D.part1 || {}, models = D.latest?.models || [];
   const sp = p.scenario_probabilities, e = sp?.ensemble;
   const pct = x => x == null ? "–" : Math.round(x) + "%";
-  const human = HUMAN_PANELS.filter(panel => humanCell("scenario_probabilities", "2030", "unconditional", panel.id, "probability", "slow"));
+  const human = HUMAN_PANELS.filter(panel => D.human?.some(row => row.elicited_statistic === "probability" && row.cohort === panel.id));
   const humanProb = (q, option) => human.map(panel => {
     const row = humanCell(q, "2030", "unconditional", panel.id, "probability", option);
     return h("td", { class: "mono" }, row ? row.value + "% (n=" + row.respondents + ")" : "–");
@@ -205,9 +213,9 @@ function progress() {
     h("div", { class: "scroll", style: "margin-top: 14px" }, h("table", { class: "tv" },
       h("thead", {}, h("tr", {}, h("th", {}, "Probability"), h("th", {}, "Model panel"), human.map(panel => h("th", {}, panel.label)), models.map(mo => h("th", {}, mo)))),
       h("tbody", {},
-        SCEN.map(sc => h("tr", {}, h("td", {}, sc.label), h("td", { class: "mono" }, pct(e && e[sc.id])), humanProb("scenario_probabilities", sc.id), models.map(mo => h("td", { class: "mono" }, pct((sp.models[mo] || {})[sc.id]))))),
+        SCEN.map(sc => h("tr", {}, h("td", {}, sc.label), h("td", { class: "mono" }, pct(e && e[sc.id])), humanProb("scenario_probabilities", sc.id), models.map(mo => h("td", { class: "mono" }, pct(sp?.models?.[mo]?.[sc.id]))))),
         [["household_robot", "A household robot does four of five chores reliably"], ["reliability", "Frontier AI needs minimal oversight for most tasks"]].map(([id, text]) =>
-          h("tr", {}, h("td", {}, text), h("td", { class: "mono" }, pct(p[id]?.ensemble)), humanProb(id, "true"), models.map(mo => h("td", { class: "mono" }, pct(p[id].models[mo])))))))));
+          h("tr", {}, h("td", {}, text), h("td", { class: "mono" }, pct(p[id]?.ensemble)), humanProb(id, "true"), models.map(mo => h("td", { class: "mono" }, pct(p[id]?.models?.[mo])))))))));
 }
 
 function download() {

@@ -203,11 +203,11 @@ guide and requires FRED access from the scheduled runtime.
 ## Human survey forecasts
 
 Economic charts show two survey medians at each horizon and scenario that
-humans answered. The larger filled dot shows superforecasters with their
-survey weights. The smaller hollow dot shows the full human panel, including
+humans answered. The bold filled dot shows superforecasters with their
+survey weights. The hollow ring shows the full human panel, including
 superforecasters, with one vote per eligible respondent. Both use the lower
-median at an exact half-weight tie. Horizontal spacing keeps equal values
-visible at the same horizon. The run-history chart gives the original survey
+median at an exact half-weight tie. All marks share the target year’s x-coordinate. Hovering anywhere along that
+year shows the model and human estimates together, including respondent counts. The run-history chart gives the original survey
 its own labeled position. Forecast details include counts and elicited ranges.
 The AI progress probability table uses the same two panels and their respective
 weighted and equal-weight means.

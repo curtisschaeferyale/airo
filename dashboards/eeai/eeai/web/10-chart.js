@@ -77,32 +77,16 @@ function humanPoints(q, hz, series) {
   return points;
 }
 
-function plotHumans(f, q, x, points, split) {
+function plotHumans(f, q, x, points) {
   for (const { sc, panel, row } of points) {
     const emphasized = panel.id === "superforecaster";
-    // A small horizontal dodge separates equal values at the same target.
-    const offset = (emphasized ? -1 : 1) * (split ? 6 + 5 * SCEN.indexOf(sc) : 8);
     const label = panel.label + " · " + sc.label + " · " + fmt(q, Number(row.value)) + " (n=" + row.respondents + ")";
     const dot = s("circle", { class: "human-point", "data-cohort": panel.id, "data-horizon": row.horizon,
-      "aria-label": label, cx: x + offset, cy: f.Y(Number(row.value)),
-      r: emphasized ? 5 : 3.5, fill: emphasized ? sc.color : "var(--panel)",
+      "aria-label": label, cx: x, cy: f.Y(Number(row.value)),
+      r: emphasized ? 6 : 8.5, fill: emphasized ? sc.color : "none",
       stroke: emphasized ? "var(--ink)" : sc.color, "stroke-width": emphasized ? 2 : 1.5 });
-    dot.append(s("title", {}, label));
     f.svg.append(dot);
   }
-}
-
-function humanRows(q, hz, series) {
-  const grid = h("div", { class: "who", style: `grid-template-columns: auto repeat(${series.length}, auto)` });
-  if (!humanPoints(q, hz, series).length) return null;
-  if (series.length > 1) grid.append(h("span", {}), ...series.map(sc => h("i", {}, sc.label.replace(" progress", ""))));
-  for (const panel of HUMAN_PANELS) {
-    grid.append(h(panel.id === "superforecaster" ? "b" : "i", {}, panel.label), ...series.map(sc => {
-      const row = humanCell(q.id, hz, sc.id, panel.id);
-      return h("span", { class: "mono" }, row ? fmt(q, Number(row.value)) + " (n=" + row.respondents + ")" : "–");
-    }));
-  }
-  return grid;
 }
 
 function niceTicks(lo, hi, n) {
@@ -161,9 +145,15 @@ const withRange = (q, v, p10, p90) => fmt(q, v) + (p10 != null && p90 != null ? 
 // `models` is one run's {model: {horizon: {scenario: {p50}}}}; `order` lists the models as the panel ranks them.
 function breakdown(q, series, hz, median, models, order) {
   const labels = Object.keys(models || {}).sort((a, b) => ((order || []).indexOf(a) + 1 || 99) - ((order || []).indexOf(b) + 1 || 99));
-  const grid = h("div", { class: "who", style: `grid-template-columns: auto repeat(${series.length}, auto)` });
+  const grid = h("div", { class: "who", style: `grid-template-columns: auto repeat(${series.length}, minmax(0, auto))` });
   if (series.length > 1) grid.append(h("span", {}), ...series.map(sc => h("i", {}, h("u", { style: `background: ${sc.color}` }), sc.label.replace(" progress", ""))));
-  grid.append(h("b", {}, "Panel median"), ...series.map(sc => h("b", { class: "mono" }, median(sc))));
+  if (median && series.some(sc => median(sc) !== "–")) grid.append(h("b", {}, "Model panel median"), ...series.map(sc => h("b", { class: "mono" }, median(sc))));
+  for (const panel of HUMAN_PANELS) {
+    const cells = series.map(sc => humanCell(q.id, hz, sc.id, panel.id));
+    if (!cells.some(Boolean)) continue;
+    grid.append(h(panel.id === "superforecaster" ? "b" : "i", {}, panel.label), ...cells.map(row =>
+      h("span", { class: "mono" }, row ? fmt(q, Number(row.value)) + " (n=" + row.respondents + ")" : "–")));
+  }
   for (const m of labels) grid.append(h("i", {}, m), ...series.map(sc =>
     h("span", { class: "mono" }, fmt(q, (((models[m] || {})[hz] || {})[sc.id] || {}).p50))));
   return grid;
@@ -177,10 +167,10 @@ function hover(f, box, stops, rows, surveyStop = null) {
   const hit = s("rect", { x: leftEdge, y: 0, width: W - leftEdge - m.r, height: H, fill: "transparent" });
   svg.append(cross, hit);
   const tip = h("div", { class: "tip", hidden: "" });
-  const show = (ev, target) => {
+  const show = ev => {
     const r = svg.getBoundingClientRect(), k = W / r.width, px = (ev.clientX - r.left) * k;
     const xv = f.x0 + (px - m.l) / (W - m.l - m.r) * (f.x1 - f.x0);
-    const st = target || (surveyStop && px < m.l ? surveyStop : stops.reduce((a, b) => Math.abs(b.x - xv) < Math.abs(a.x - xv) ? b : a));
+    const st = surveyStop && (!stops.length || px < m.l) ? surveyStop : stops.reduce((a, b) => Math.abs(b.x - xv) < Math.abs(a.x - xv) ? b : a);
     const stopX = st === surveyStop ? f.surveyX : X(st.x);
     cross.setAttribute("x1", stopX); cross.setAttribute("x2", stopX); cross.setAttribute("visibility", "visible");
     tip.replaceChildren(...rows(st).filter(Boolean));
@@ -193,14 +183,6 @@ function hover(f, box, stops, rows, surveyStop = null) {
   hit.addEventListener("pointerdown", show);
   const hide = () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); };
   hit.addEventListener("pointerleave", hide);
-  // The slightly offset survey marks still belong to their exact target year.
-  for (const dot of svg.querySelectorAll(".human-point")) {
-    const target = surveyStop || stops.find(st => st.hz?.id === dot.dataset.horizon);
-    svg.append(dot);
-    dot.addEventListener("pointermove", ev => show(ev, target));
-    dot.addEventListener("pointerdown", ev => show(ev, target));
-    dot.addEventListener("pointerleave", hide);
-  }
   box.replaceChildren(svg, tip);
 }
 
@@ -239,6 +221,7 @@ function drawTimeline(box, q, opts) {
     svg.append(s("circle", { cx: X(yearOf(z.actual.date)), cy: Y(z.actual.value), r: 3, fill: "var(--ink)" }));
   }
   const ends = [];
+  for (const { horizon, points } of humans) plotHumans(f, q, X(+horizon.id), points);
   for (const sc of series) {
     const un = sc.id === "unconditional";
     for (const z of settled) {
@@ -256,23 +239,25 @@ function drawTimeline(box, q, opts) {
     for (const p of pts) f.dot(p[0], p[1], sc);
     ends.push({ sc, y: Y(pts[pts.length - 1][1]), x: X(pts[pts.length - 1][0]), v: pts[pts.length - 1][1] });
   }
-  for (const { horizon, points } of humans) plotHumans(f, q, X(+horizon.id), points, opts.split);
   endLabels(f, q, ends);
   // The stops: a data point, or a date asked about (its outcome's point, once there is one).
-  const done = new Set(settled.map(z => z.actual.date));
-  const stops = hist.filter(p => !done.has(p[2])).map(p => ({ x: p[0], hist: p }))
-    .concat(horizons.map(z => ({ x: z.actual ? yearOf(z.actual.date) : +z.id, hz: z })));
+  const byDate = new Map(hist.map(p => [p[0], { x: p[0], hist: p }]));
+  for (const hz of horizons) {
+    const x = +hz.id;
+    byDate.set(x, { ...byDate.get(x), x, hz });
+  }
   const kind = opts.split ? "" : " · unconditional";
-  hover(f, box, stops, st => {
-    if (st.hist) return [h("b", {}, st.hist[2].slice(0, 4)), tipRow("Actual", fmt(q, st.hist[1]))];
+  hover(f, box, [...byDate.values()], st => {
+    if (!st.hz) return [h("b", {}, st.hist[2].slice(0, 4)), tipRow("Actual", fmt(q, st.hist[1]))];
     const z = st.hz, who = runFor(q, z.id).models;
     if (!z.actual) return [h("b", {}, `Forecast for ${z.id}${kind}`),
-      breakdown(q, series, z.id, sc => withRange(q, val(q, z.id, sc.id), val(q, z.id, sc.id, "p10"), val(q, z.id, sc.id, "p90")), who, opts.order), humanRows(q, z.id, series)];
+      st.hist && tipRow("Historical series", fmt(q, st.hist[1])),
+      breakdown(q, series, z.id, sc => withRange(q, val(q, z.id, sc.id), val(q, z.id, sc.id, "p10"), val(q, z.id, sc.id, "p90")), who, opts.order)];
     const a = z.actual.value;
     return [h("b", {}, `${z.id}: forecast and outcome${kind}`), tipRow("Outcome", fmt(q, a)),
       z.actual.vintage && tipRow("Source vintage", z.actual.vintage),
       breakdown(q, series, z.id, sc => { const v = val(q, z.id, sc.id); return fmt(q, v) + (v == null || !scoreable(sc.id) ? "" : `  (${missText(q, v - a)})`); }, who, opts.order),
-      humanRows(q, z.id, series), z.asked && tipRow("Forecast made", z.asked)];
+      z.asked && tipRow("Forecast made", z.asked)];
   });
 }
 
@@ -282,14 +267,15 @@ function drawHistory(box, q, opts) {
   const at = (r, sc, p) => ((r.ensemble[z.id] || {})[sc.id] || {})[p || "p50"];
   const runs = q.series.filter(r => (!z.resolution_rule || (r.rule_versions?.[z.id] ?? 1) === z.resolution_rule.version)
     && series.some(sc => at(r, sc) != null)).map(r => ({ ...r, x: Date.parse(r.at) / 864e5 }));
-  if (!runs.length) { box.replaceChildren(h("p", { class: "empty" }, `No forecast for ${z.id} yet.`)); return; }
-  const span = runs[runs.length - 1].x - runs[0].x, pad = span ? span * 0.06 : 1;
+  const points = humanPoints(q, z.id, series);
+  if (!runs.length && !points.length && !z.actual) { box.replaceChildren(h("p", { class: "empty" }, `No forecast for ${z.id} yet.`)); return; }
+  const first = runs[0]?.x ?? 0, last = runs.at(-1)?.x ?? first;
+  const span = last - first, pad = span ? span * 0.06 : 1;
   const ys = z.actual ? [z.actual.value] : [];
   for (const r of runs) for (const sc of series) for (const p of ["p10", "p50", "p90"])
     if (at(r, sc, p) != null && (p === "p50" || sc.id === "unconditional")) ys.push(at(r, sc, p));
-  const points = humanPoints(q, z.id, series);
   for (const { row } of points) ys.push(Number(row.value));
-  const f = frame(box, q, opts.size, runs[0].x - pad, runs[runs.length - 1].x + pad, ys, points.length > 0), { svg, X, Y } = f;
+  const f = frame(box, q, opts.size, first - pad, last + pad, ys, points.length > 0), { svg, X, Y } = f;
   svg.setAttribute("aria-label", `${q.short}: how the panel's median forecast for ${z.id} has changed from run to run.`);
   // A run's label is its date -- with the year once the runs span one, and the time when two share a day.
   const days = runs.map(r => r.date), clock = new Set(days).size < days.length, years = span > 300;
@@ -321,11 +307,12 @@ function drawHistory(box, q, opts) {
   }
   endLabels(f, q, ends);
   if (points.length) {
-    plotHumans(f, q, f.surveyX, points, opts.split);
+    plotHumans(f, q, f.surveyX, points);
     svg.append(s("text", { x: f.surveyX, y: f.H - 6, "text-anchor": "middle" }, "Survey"));
   }
   const surveyStop = points.length ? { survey: true } : null;
-  hover(f, box, runs, r => r.survey ? [h("b", {}, `Original survey · forecast for ${z.id}`), humanRows(q, z.id, series)] : [h("b", {}, `Asked ${r.date}` + (clock ? ` ${r.at.slice(11, 16)}` : "") + ` · forecast for ${z.id}` + (opts.split ? "" : ", unconditional")),
+  if (!runs.length && !points.length) { box.replaceChildren(svg); return; }
+  hover(f, box, runs, r => r.survey ? [h("b", {}, `Original survey · forecast for ${z.id}`), breakdown(q, series, z.id)] : [h("b", {}, `Asked ${r.date}` + (clock ? ` ${r.at.slice(11, 16)}` : "") + ` · forecast for ${z.id}` + (opts.split ? "" : ", unconditional")),
     breakdown(q, series, z.id, sc => withRange(q, at(r, sc), at(r, sc, "p10"), at(r, sc, "p90")), r.models, opts.order),
     z.actual && tipRow("Outcome", fmt(q, z.actual.value))], surveyStop);
 }
