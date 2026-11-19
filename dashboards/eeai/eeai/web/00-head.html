@@ -89,6 +89,9 @@
   .tip { box-sizing: border-box; max-width: 100%; position: absolute; pointer-events: none; background: var(--ink); color: #fff; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45; z-index: 5; box-shadow: var(--shadow); }
   .tip .who { display: grid; gap: 2px 8px; margin-top: 3px; text-align: right; justify-items: end; }
   .tip .who > :first-child, .tip .who > i:not(:has(u)), .tip .who > b:not(.mono) { justify-self: start; text-align: left; }
+  .tip-number { justify-self: stretch; min-width: 0; text-align: right; }
+  .tip-number small { display: block; font-size: 0.85em; line-height: 1.2; opacity: .8; }
+  .tip-value { white-space: nowrap; }
   .tip .who b { font-weight: 600; }
   .tip .who u { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; text-decoration: none; }
   .tip b { font-weight: 600; } .tip .row { display: flex; gap: 12px; justify-content: space-between; } .tip i { font-style: normal; opacity: .75; }

@@ -140,22 +140,30 @@ function endLabels(f, q, ends) {
 
 // Hover: a crosshair on the nearest stop ({x, ...}) and a tooltip of rows(stop).
 const tipRow = (label, text) => h("div", { class: "row" }, h("i", {}, label), h("span", { class: "mono" }, text));
-const withRange = (q, v, p10, p90) => fmt(q, v) + (p10 != null && p90 != null ? `  (${fmt(q, p10, true)} to ${fmt(q, p90, true)})` : "");
+const rangeText = (q, p10, p90) => p10 != null && p90 != null ? `(${fmt(q, p10, true)} to ${fmt(q, p90, true)})` : "";
+const withRange = (q, v, p10, p90) => [fmt(q, v), rangeText(q, p10, p90)].filter(Boolean).join("  ");
+
+function tipNumber(q, value, detail, bold = false) {
+  return h("span", { class: "mono tip-number" },
+    h(bold ? "b" : "span", { class: "tip-value" }, fmt(q, value)),
+    detail && h("small", {}, detail));
+}
 // Who said what: the panel's median and each model's own median, a column per series shown.
 // `models` is one run's {model: {horizon: {scenario: {p50}}}}; `order` lists the models as the panel ranks them.
-function breakdown(q, series, hz, median, models, order) {
+function breakdown(q, series, hz, median, models, order, detail) {
   const labels = Object.keys(models || {}).sort((a, b) => ((order || []).indexOf(a) + 1 || 99) - ((order || []).indexOf(b) + 1 || 99));
   const grid = h("div", { class: "who", style: `grid-template-columns: auto repeat(${series.length}, minmax(0, auto))` });
   if (series.length > 1) grid.append(h("span", {}), ...series.map(sc => h("i", {}, h("u", { style: `background: ${sc.color}` }), sc.label.replace(" progress", ""))));
-  if (median && series.some(sc => median(sc) !== "–")) grid.append(h("b", {}, "Model panel median"), ...series.map(sc => h("b", { class: "mono" }, median(sc))));
+  if (median && series.some(sc => median(sc) != null)) grid.append(h("b", {}, "Model panel median"),
+    ...series.map(sc => tipNumber(q, median(sc), detail?.(sc), true)));
   for (const panel of HUMAN_PANELS) {
     const cells = series.map(sc => humanCell(q.id, hz, sc.id, panel.id));
     if (!cells.some(Boolean)) continue;
     grid.append(h(panel.id === "superforecaster" ? "b" : "i", {}, panel.label), ...cells.map(row =>
-      h("span", { class: "mono" }, row ? fmt(q, Number(row.value)) + " (n=" + row.respondents + ")" : "–")));
+      tipNumber(q, row ? Number(row.value) : null, row && "n=" + row.respondents)));
   }
   for (const m of labels) grid.append(h("i", {}, m), ...series.map(sc =>
-    h("span", { class: "mono" }, fmt(q, (((models[m] || {})[hz] || {})[sc.id] || {}).p50))));
+    tipNumber(q, models[m]?.[hz]?.[sc.id]?.p50)));
   return grid;
 }
 // The run whose forecast for a date the page shows: the latest that asked about it.
@@ -252,11 +260,15 @@ function drawTimeline(box, q, opts) {
     const z = st.hz, who = runFor(q, z.id).models;
     if (!z.actual) return [h("b", {}, `Forecast for ${z.id}${kind}`),
       st.hist && tipRow("Historical series", fmt(q, st.hist[1])),
-      breakdown(q, series, z.id, sc => withRange(q, val(q, z.id, sc.id), val(q, z.id, sc.id, "p10"), val(q, z.id, sc.id, "p90")), who, opts.order)];
+      breakdown(q, series, z.id, sc => val(q, z.id, sc.id), who, opts.order,
+        sc => rangeText(q, val(q, z.id, sc.id, "p10"), val(q, z.id, sc.id, "p90")))];
     const a = z.actual.value;
     return [h("b", {}, `${z.id}: forecast and outcome${kind}`), tipRow("Outcome", fmt(q, a)),
       z.actual.vintage && tipRow("Source vintage", z.actual.vintage),
-      breakdown(q, series, z.id, sc => { const v = val(q, z.id, sc.id); return fmt(q, v) + (v == null || !scoreable(sc.id) ? "" : `  (${missText(q, v - a)})`); }, who, opts.order),
+      breakdown(q, series, z.id, sc => val(q, z.id, sc.id), who, opts.order, sc => {
+        const v = val(q, z.id, sc.id);
+        return v != null && scoreable(sc.id) ? `(${missText(q, v - a)})` : "";
+      }),
       z.asked && tipRow("Forecast made", z.asked)];
   });
 }
@@ -313,6 +325,7 @@ function drawHistory(box, q, opts) {
   const surveyStop = points.length ? { survey: true } : null;
   if (!runs.length && !points.length) { box.replaceChildren(svg); return; }
   hover(f, box, runs, r => r.survey ? [h("b", {}, `Original survey · forecast for ${z.id}`), breakdown(q, series, z.id)] : [h("b", {}, `Asked ${r.date}` + (clock ? ` ${r.at.slice(11, 16)}` : "") + ` · forecast for ${z.id}` + (opts.split ? "" : ", unconditional")),
-    breakdown(q, series, z.id, sc => withRange(q, at(r, sc), at(r, sc, "p10"), at(r, sc, "p90")), r.models, opts.order),
+    breakdown(q, series, z.id, sc => at(r, sc), r.models, opts.order,
+      sc => rangeText(q, at(r, sc, "p10"), at(r, sc, "p90"))),
     z.actual && tipRow("Outcome", fmt(q, z.actual.value))], surveyStop);
 }
