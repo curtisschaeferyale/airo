@@ -102,6 +102,9 @@ function modelTable(q, hz) {
     h("th", { colspan: 5, scope: "rowgroup" }, title, forecastDate(date)));
   return h("div", { class: "scroll" }, h("table", { class: "tv" },
     h("thead", {}, h("tr", {}, h("th", {}, `${hz}`), h("th", {}, "Unconditional"), h("th", {}, "Slow"), h("th", {}, "Moderate"), h("th", {}, "Rapid"))),
+    (hasMedian || modelRows.length > 0) && h("tbody", {}, group("Model forecasts", formatRunDate(runFor(q, hz).date)),
+      hasMedian && h("tr", {}, h("td", {}, h("b", {}, "Model panel median")), cols.map(c => h("td", { class: "mono" }, ens(c)))),
+      modelRows.map(([label, forecasts]) => h("tr", {}, h("td", {}, label), cols.map(c => h("td", { class: "mono" }, cell(forecasts, c)))))),
     panels.length > 0 && h("tbody", {}, group("Human forecasts", humanSurveyDate),
       panels.map(panel =>
         h("tr", {}, h("th", { scope: "row" }, panel.label), cols.map(sc => {
@@ -111,10 +114,7 @@ function modelTable(q, hz) {
           const lo = at("p10"), hi = at("p90");
           return h("td", { class: "mono" }, withRange(q, Number(median.value), lo && Number(lo.value), hi && Number(hi.value))
             + " (n=" + median.respondents + ")");
-        })))),
-    (hasMedian || modelRows.length > 0) && h("tbody", {}, group("Model forecasts", formatRunDate(runFor(q, hz).date)),
-      hasMedian && h("tr", {}, h("td", {}, h("b", {}, "Model panel median")), cols.map(c => h("td", { class: "mono" }, ens(c)))),
-      modelRows.map(([label, forecasts]) => h("tr", {}, h("td", {}, label), cols.map(c => h("td", { class: "mono" }, cell(forecasts, c))))))));
+        }))))));
 }
 const rationales = q => q.models.map(m => h("p", {}, h("span", { class: "who" }, m.label + ": "), m.rationale || "No rationale given."));
 // Each date whose outcome is in: the outcome, and every forecast with its miss.
@@ -200,7 +200,6 @@ function tile(q) {
 function progress() {
   const p = D.part1 || {}, models = D.latest?.models || [];
   const sp = p.scenario_probabilities, e = sp?.ensemble;
-  const pct = x => x == null ? "–" : Math.round(x) + "%";
   const human = HUMAN_PANELS.filter(panel => D.human?.some(row => row.question === "scenario_probabilities" && row.cohort === panel.id));
   const modelDate = formatRunDate(D.latest?.date);
   const probability = (value, date, count) => h("td", { class: "mono" },
@@ -217,19 +216,17 @@ function progress() {
     const describe = sc => sc.label + " " + values[sc.id] + "%";
     return h("figure", {}, h("figcaption", {}, h("b", {}, label), forecastDate(date)),
       h("div", { class: "bar", role: "img", "aria-label": label + ". " + SCEN.map(describe).join(", ") },
-        SCEN.map(sc => h("div", { style: `flex: ${values[sc.id]} 0 0; background: ${sc.color}`, title: describe(sc) }))),
-      h("div", { class: "legend" }, SCEN.map(sc => h("span", {},
-        h("i", { class: "sw dot", style: `color: ${sc.color}` }), sc.label.split(" ")[0] + " " + pct(values[sc.id])))));
+        SCEN.map(sc => h("div", { style: `flex: ${values[sc.id]} 0 0; background: ${sc.color}`, title: describe(sc) }))));
   }
   return h("section", { class: "card ai-progress" }, h("h2", {}, "AI progress by 2030"),
     h("p", { class: "sub" }, "The survey asks which level of AI capability will be reached by the end of 2030."),
-    h("div", { class: "scenario-bars" }, scenarioBar("Full human panel", fullPanel, humanSurveyDate),
-      scenarioBar("Model ensemble", e, modelDate)),
+    h("div", { class: "scenario-bars" }, scenarioBar("Model ensemble", e, modelDate),
+      scenarioBar("Full human panel", fullPanel, humanSurveyDate)),
     h("div", { class: "scroll", style: "margin-top: 14px" }, h("table", { class: "tv" },
-      h("thead", {}, h("tr", {}, h("th", {}, "Probability"), h("th", {}, "Model panel"), human.map(panel => h("th", {}, panel.label)), models.map(mo => h("th", {}, mo)))),
+      h("thead", {}, h("tr", {}, h("th", {}, "Probability"), h("th", {}, "Model panel"), models.map(mo => h("th", {}, mo)), human.map(panel => h("th", {}, panel.label)))),
       h("tbody", {},
         SCEN.map(sc => h("tr", {}, h("td", {}, sc.label), modelProb(e?.[sc.id]),
-          humanProb(sc.id), models.map(mo => modelProb(sp?.models?.[mo]?.[sc.id]))))))),
+          models.map(mo => modelProb(sp?.models?.[mo]?.[sc.id])), humanProb(sc.id)))))),
     D.scenarios.filter(sc => sc.summary).map(sc => h("div", { class: "scenario-definition" },
       h("h3", {}, sc.label), h("p", {}, sc.summary))));
 }

@@ -168,6 +168,11 @@ function breakdown(q, series, hz, run = {}, order, detail) {
     [rangeText(q, cell?.p10, cell?.p90), extra].filter(Boolean).join(" "), bold);
   const ensemble = run.ensemble?.[hz];
   const group = text => h("span", { class: "source-group" }, text);
+  const hasMedian = series.some(sc => ensemble?.[sc.id]?.p50 != null);
+  if (hasMedian || labels.length) grid.append(group("Model forecasts"));
+  if (hasMedian) grid.append(label("Model panel median", date, true),
+    ...series.map(sc => number(ensemble[sc.id], detail?.(sc), true)));
+  for (const m of labels) grid.append(label(m, date), ...series.map(sc => number(models[m]?.[hz]?.[sc.id])));
   const panels = HUMAN_PANELS.filter(panel => series.some(sc => humanCell(q.id, hz, sc.id, panel.id)));
   if (panels.length) grid.append(group("Human forecasts"));
   for (const panel of panels) {
@@ -178,11 +183,6 @@ function breakdown(q, series, hz, run = {}, order, detail) {
         "n=" + row.respondents].filter(Boolean).join(" "));
     }));
   }
-  const hasMedian = series.some(sc => ensemble?.[sc.id]?.p50 != null);
-  if (hasMedian || labels.length) grid.append(group("Model forecasts"));
-  if (hasMedian) grid.append(label("Model panel median", date, true),
-    ...series.map(sc => number(ensemble[sc.id], detail?.(sc), true)));
-  for (const m of labels) grid.append(label(m, date), ...series.map(sc => number(models[m]?.[hz]?.[sc.id])));
   return grid;
 }
 // The run whose forecast for a date the page shows: the latest that asked about it.
