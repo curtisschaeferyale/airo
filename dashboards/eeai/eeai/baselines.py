@@ -27,7 +27,7 @@ def refresh(as_of=None, reader=resolve.fetch):
         report = {}
         for q in survey.load()["questions"]:
             rule = q["resolution"]
-            if rule["method"] == "adjudicated":
+            if q["resolver"] != "fred":
                 continue
             series = q["history"]
             first_year = int(seed[series][-1][0][:4])

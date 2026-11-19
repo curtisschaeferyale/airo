@@ -101,14 +101,24 @@ function rationale(q, hz) {
 function outcomes(q) {
   const cols = [UNCOND].concat(SCEN), rows = q.horizons.filter(z => z.actual && cols.some(c => val(q, z.id, c.id) != null));
   if (!rows.length) return null;
-  const cell = (z, c) => { const v = val(q, z.id, c.id), d = v - z.actual.value;
+  const cell = (z, c, outcome, latest) => {
+    const v = val(q, z.id, c.id);
     if (v == null) return "–";
-    if (!scoreable(c.id)) return fmt(q, v);
-    return `${fmt(q, v)} (${missText(q, d)})`; };
+    return scoreable(c.id, latest) ? `${fmt(q, v)} (${missText(q, v - outcome.value)})` : fmt(q, v);
+  };
+  const tableRows = rows.flatMap(z => {
+    const history = z.actual.revisions || [z.actual];
+    const views = [["First published", history[0]]];
+    if (history.length > 1 || (D.latest_realized_scenario && D.latest_realized_scenario !== D.realized_scenario)) views.push(["Latest revised", history[history.length - 1]]);
+    return views.map(([label, outcome], index) => h("tr", {},
+      h("td", {}, z.id), h("td", {}, outcome.vintage ? label + " · " + outcome.vintage : "First observed"),
+      h("td", { class: "mono" }, fmt(q, outcome.value)),
+      cols.map(c => h("td", { class: "mono" }, cell(z, c, outcome, index === 1)))));
+  });
   return h("div", { class: "scroll" }, h("table", { class: "tv" },
-    h("thead", {}, h("tr", {}, h("th", {}, "Date"), h("th", {}, "Outcome"), cols.map(c => h("th", {}, c.label.replace(" progress", ""))))),
-    h("tbody", {}, rows.map(z => h("tr", {}, h("td", {}, z.id), h("td", { class: "mono" }, fmt(q, z.actual.value)),
-      cols.map(c => h("td", { class: "mono" }, cell(z, c))))))));
+    h("thead", {}, h("tr", {}, h("th", {}, "Target"), h("th", {}, "Release"), h("th", {}, "Outcome"),
+      cols.map(c => h("th", {}, c.label.replace(" progress", ""))))),
+    h("tbody", {}, tableRows)));
 }
 const defined = q => [
   q.preamble && h("p", {}, q.preamble),
@@ -236,7 +246,7 @@ function render() {
       download())),
     h("footer", {}, "Questions and scenario definitions are from the Forecasting Research Institute's Economic Effects of AI survey. ",
       "The panel is the four highest-ranked models on Epoch's Capabilities Index that FRI can run, one per model family. ",
-      "Forecasts are not yet scored against outcomes.")].filter(Boolean));
+      "Once an outcome is available, its table shows the forecast median minus the outcome. Conditional forecasts are scored when the AI scenario is known.")].filter(Boolean));
   for (const draw of charts) draw();
   root.style.minHeight = "";
 }

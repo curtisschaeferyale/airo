@@ -38,7 +38,8 @@ the models of a run. Instrument: {instrument}. Runs: {runs}.
   scenario, the weight on each capability indicator, and two milestones.
 - questions.json: the current definitions. The run files retain the original prompts.
 - history.csv: the baseline drawn on the page (series, date, value).
-- resolutions.json: frozen outcomes with rule versions and source evidence, when present.
+- resolutions.json: first outcomes with rule versions and source evidence. When a target has revisions,
+  its `revisions` array contains the full source history, including the first release.
 - runs/: the run files, one JSON object per line and one line per model and
   question. A call's first line carries the prompt, every search and page
   read, and the token usage.

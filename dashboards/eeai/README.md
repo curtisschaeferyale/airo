@@ -147,8 +147,9 @@ point with the refreshed value, and atomically writes a dated CSV under
 in the survey. New runs retain the history they used in their call record.
 The page and download share the same baseline snapshot.
 
-Each question carries its own versioned rule. Resolution selects the earliest
-FRED vintage covering every required input. GDP and TFP compound five annual
+Each question selects a dashboard-local resolver and carries its own versioned rule.
+The FRED resolver records the earliest vintage covering every input and each
+subsequent vintage that changes the computed value. GDP and TFP compound five annual
 rates. Labor productivity uses five nonoverlapping Q4 year-over-year rates,
 the quarterly convention that best reproduces the original chart. The three
 labor-market rates use January. Employment shares combine the specified January
@@ -157,22 +158,33 @@ Q1 index to the survey's Q1 2023 percentage. Income uses the chart's income
 year and converts each real observation to 2023 dollars using the same vintage's
 2023 nominal-to-real ratio. Sources with rounding may introduce small differences.
 
-`resolve` runs just the outcome check. Frozen decisions and evidence live in
+`resolve` runs just the outcome check. Versioned observations and their evidence live in
 `EEAI_RESULTS/resolutions.sqlite`; the build includes them in the page and
 `resolutions.json` in the download. Forecasts made before rules were recorded
 use version 1. When changing a rule, increment its version and retain its
 original definition under the question's `previous_rules["1"]`.
 
+The timeline retains the first-release comparison. The outcomes table also
+shows the latest revised value, its date and its signed error. Use
+`python3 -m eeai replay gdp 2025 --as-of 2026-11-19 --history` to inspect all
+distinct vintages without recording them. The page pins `outcome_snapshot_id`;
+the ZIP includes the same observations. New forecast rows pin the hash of the
+baseline supplied to the model and retain its values in the call record.
+
 Wealth inequality, life satisfaction, AI-assisted hours, AI electricity, and
 the end-of-2030 scenario accept a sourced decision under the survey criteria.
-Use `python3 -m eeai decide FILE.json`. The JSON fields are `question`,
+Place reviewed releases in `EEAI_RESULTS/reviewed/*.json` for the scheduled resolver,
+or use `python3 -m eeai decide FILE.json` to import a decision explicitly. The JSON fields are `question`,
 `horizon` (a year string), `version`, `value`, `period`, `vintage` (ISO source
 publication date), `source`, `reviewer`, and `rationale`. Cite the source table
 or panel decision and explain how it meets the question wording. For the
 scenario, use question `ai_scenario`, horizon `2030`, and a survey scenario ID.
 A correction also takes `correction_reason` and the prior stored record as
 `previous` (the download row without its question and horizon keys). Concurrent
-changes reject a stale correction. Prior evidence remains in the record.
+changes reject a stale correction. To correct a revised release, supply that
+specific entry from `revisions` as `previous`. Use distinct `revision_id` values
+for separate reviewed releases on the same date. Corrections use the explicit
+`decide` command and retain the prior evidence.
 
 The schedule in `packages/ops/jobs.json` requests a daily 15:15 UTC economic
 refresh and verified site rebuild. This job uses existing forecast runs and

@@ -67,7 +67,7 @@ class TestQuestionSet(unittest.TestCase):
         from eeai import resolve
         from dashboard import resolutions
 
-        def observations(series, periods, as_of):
+        def observations(series, periods, as_of, **options):
             if series == "UNRATE":
                 return [dict(date="2026-12-01", value="4.0", realtime_start="2027-01-10",
                              realtime_end=as_of)]

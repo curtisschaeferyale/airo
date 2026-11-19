@@ -49,7 +49,11 @@ function fmt(q, v, bare) {
 }
 // A miss, signed, to one more decimal than the values beside it (so 2.5 against 2.5 can read −0.07).
 const missText = (q, d) => (d >= 0 ? "+" : "−") + fmt({ ...q, decimals: q.decimals ? q.decimals + 1 : 0 }, Math.abs(d), true);
-const scoreable = id => id === UNCOND.id || id === window.__EEAI__?.realized_scenario;
+const scoreable = (id, latest = false) => {
+  const data = window.__EEAI__;
+  const scenario = latest ? data?.latest_realized_scenario : data?.realized_scenario;
+  return id === UNCOND.id || id === scenario;
+};
 const yearOf = d => +d.slice(0, 4) + (+d.slice(5, 7) - 1) / 12;
 const val = (q, hz, sc, p) => (((q.ensemble || {})[hz] || {})[sc] || {})[p || "p50"];
 

@@ -74,6 +74,52 @@ class ResolutionTest(unittest.TestCase):
             q = next(q for q in blob["questions"] if q["id"] == row["question"])
             self.assertEqual(q["horizons"][0]["actual"]["inputs"], row["inputs"])
 
+    def test_refresh_imports_reviewed_releases_and_exports_both(self):
+        q = self.q["ai_electricity"]
+        reviewed = self.root / "reviewed"
+        reviewed.mkdir()
+        for vintage, value in [("2031-02-10", 2.0), ("2031-03-20", 2.2)]:
+            decision = dict(question=q["id"], horizon="2030", version=1, value=value,
+                            source="Example report", period="2030", vintage=vintage,
+                            reviewer="Energy panel", rationale="Annual US estimate")
+            (reviewed / (vintage + ".json")).write_text(json.dumps(decision))
+        self.doc["questions"] = [q]
+        with patch.object(survey, "load", return_value=self.doc):
+            resolve.refresh(date(2031, 4, 1))
+            resolve.refresh(date(2031, 4, 2))
+        records = resolutions.snapshot(self.root / "resolutions.sqlite")
+        actual = next(h for h in build.build(self.doc, runs=[], outcomes=records)["questions"][0]["horizons"]
+                      if h["id"] == "2030")["actual"]
+        self.assertEqual(actual["value"], 2.0)
+        self.assertEqual([r["value"] for r in actual["revisions"]], [2.0, 2.2])
+        path = self.root / "out.zip"
+        export.bundle(path, self.doc, [], outcomes=records)
+        with zipfile.ZipFile(path) as archive:
+            self.assertEqual(json.loads(archive.read("resolutions.json"))[0]["revisions"], actual["revisions"])
+
+    def test_fred_batch_reads_shared_series_once_and_handles_clipped_vintages(self):
+        q = self.q["unemployment"]
+        second = dict(q, id="another_question")
+        self.doc["questions"] = [q, second]
+        calls = []
+        def reader(key, periods, as_of, since=None):
+            calls.append((key, since))
+            rows = []
+            for start, end, value in [("2027-02-01", "2027-02-28", 4.0),
+                                      ("2027-03-01", "9999-12-31", 4.1)]:
+                if start <= as_of and (since is None or end >= since):
+                    rows.append(dict(date="2027-01-01", value=str(value),
+                                     realtime_start=max(start, since or start), realtime_end=end))
+            return rows
+        with patch.object(survey, "load", return_value=self.doc):
+            for day in (date(2027, 2, 15), date(2027, 3, 10), date(2027, 4, 15)):
+                resolve.refresh(day, reader)
+        self.assertEqual(calls, [("UNRATE", None), ("UNRATE", "2027-02-14"), ("UNRATE", "2027-03-09")])
+        head, histories = resolutions.history(self.root / "resolutions.sqlite")
+        self.assertEqual((head, len(histories)), (4, 2))
+        for records in histories.values():
+            self.assertEqual([r["vintage"] for r in records], ["2027-02-01", "2027-03-01"])
+
     def test_job_shares_reproduce_survey_examples(self):
         counts = {"USINFO": 2963, "USFIRE": 9165, "USPBS": 22668, "USGOOD": 21631,
                   "USTPU": 28799, "USEHS": 26033, "USLAH": 16716, "USSERV": 5917, "CLF16OV": 167308}

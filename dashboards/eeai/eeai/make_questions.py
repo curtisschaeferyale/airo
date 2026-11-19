@@ -275,6 +275,7 @@ def build():
                         + [{"id": h, "text": text, "added": False} for h, text in horizons],
             "details": details_of(supp3, q.get("supplementary") or heading),
             "history": q["history"],
+            "resolver": "reviewed" if q["resolution"]["method"] == "adjudicated" else "fred",
             "resolution": q["resolution"],
         })
 

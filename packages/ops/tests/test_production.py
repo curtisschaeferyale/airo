@@ -878,3 +878,17 @@ def test_economic_refresh_failure_keeps_publication(tmp_path, runtime, monkeypat
         runtime.execute_job("eeai-refresh-example", {"id": "eeai-economic-data", "kind": "refresh"})
     assert (old_site / "index.html").read_text() == "prior publication"
     assert json.loads((runtime.root / "runs/eeai-refresh-example.json").read_text())["status"] == "failed"
+
+
+def test_dashboard_refresh_registration_and_default_schedule(monkeypatch):
+    from dataclasses import replace
+
+    job = {"id": "survey-evidence", "dashboard": "rsi", "kind": "refresh"}
+    with pytest.raises(ValueError, match="no registered refresh command"):
+        p.validate_jobs([job])
+    monkeypatch.setitem(p.DASHBOARDS, "rsi", replace(p.DASHBOARDS["rsi"], refresh=("-m", "example", "refresh")))
+    at = datetime(2030, 1, 1, 15, 15, tzinfo=timezone.utc)
+    assert list(p.due_jobs([job], at)) == [("survey-evidence-20300101", job)]
+    override = dict(job, daily_utc="08:00")
+    assert not list(p.due_jobs([override], at))
+    assert list(p.due_jobs([override], at.replace(hour=8, minute=0))) == [("survey-evidence-20300101", override)]

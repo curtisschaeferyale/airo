@@ -84,6 +84,9 @@ def output(argv, **kw):
     return run(argv, capture_output=True, text=True, **kw).stdout.strip()
 
 
+DEFAULT_REFRESH_UTC = '15:15'
+
+
 def validate_jobs(jobs):
     ids = set()
     for job in jobs:
@@ -93,11 +96,14 @@ def validate_jobs(jobs):
         owner = job.get('dashboard', 'airo')
         if owner not in DASHBOARDS or (owner != 'airo' and job['kind'] not in ('forecast', 'refresh', 'smoke')):
             raise ValueError('Unknown dashboard or unsupported dashboard job')
-        if job['kind'] == 'refresh' and owner != 'eeai':
-            raise ValueError('Economic refresh belongs to EEAI')
+        if job['kind'] == 'refresh' and not DASHBOARDS[owner].refresh:
+            raise ValueError(f'{owner} has no registered refresh command')
         if job['kind'] not in ('forecast', 'forecastbench', 'news-poll', 'refresh', 'smoke'):
             raise ValueError('Unknown job kind')
-        if sum(k in job for k in ('at', 'daily_utc', 'weekly_utc')) != 1:
+        schedules = sum(k in job for k in ('at', 'daily_utc', 'weekly_utc'))
+        if schedules == 0 and job['kind'] == 'refresh':
+            continue  # The scheduler uses the daily refresh default.
+        if schedules != 1:
             raise ValueError('Specify one UTC schedule: at, daily_utc or weekly_utc')
         if 'at' in job:
             when = datetime.fromisoformat(job['at'].replace('Z', '+00:00'))
@@ -131,7 +137,7 @@ def scheduled_between(jobs, after, before):
             if 'weekly_utc' in job:
                 weekday, clock = job['weekly_utc'].split()
             else:
-                clock = job['daily_utc']
+                clock = job.get('daily_utc', DEFAULT_REFRESH_UTC)
             hour, minute = map(int, clock.split(':'))
             start = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
             days = (before.date() - after.date()).days
@@ -642,7 +648,7 @@ class Runtime:
             site = self.root / 'sites' / ('job-' + key)
             ledger = self.root / 'runs' / (key + '.alerts.jsonl')
             airo = code / AIRO
-            argv = {'refresh': [code / '.venv/bin/python', '-m', 'eeai', 'refresh'],
+            argv = {'refresh': [code / '.venv/bin/python', *self.dashboard.refresh],
                     'forecast': ['bash', airo / 'code/cron_run.sh'],
                     'news-poll': [code / '.venv/bin/python', airo / 'code/recent_news.py', 'poll'],
                     'forecastbench': ['bash', code / FORECASTBENCH / 'scripts/fb_cron.sh', job.get('due', '')],
