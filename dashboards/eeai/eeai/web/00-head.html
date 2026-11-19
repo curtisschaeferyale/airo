@@ -149,7 +149,17 @@
   .scenario-bars { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .scenario-bars figure { margin: 0; min-width: 0; }
   .scenario-bars figcaption { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
-  .scenario-bars .bar div { min-width: 0; }
+  .scenario-bars .bar button { min-width: 0; border: 0; padding: 0; cursor: help; }
+  .scenario-bars .bar button:is(:hover,:focus-visible) { box-shadow: inset 0 0 0 2px var(--ink); }
+  .ai-progress { position: relative; }
+  .probability { background: none; color: inherit; border: 0; padding: 0; font: inherit; cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .progress-tooltip { position: absolute; z-index: 5; pointer-events: none; background: #202c27; color: white; border-radius: 10px; padding: 12px 14px; width: min(330px, calc(100vw - 20px)); font-size: 14px; box-shadow: var(--shadow); }
+  .progress-tooltip small { display: block; color: #d4e2da; }
+  .progress-tooltip p { margin: 6px 0 0; }
+  .model-rationale { border-bottom: 1px solid var(--line); padding: 10px 0; }
+  .model-rationale summary { cursor: pointer; font-weight: 600; }
+  .model-rationale summary:is(:hover,:focus-visible) { color: var(--link); }
+  .model-rationale p { max-width: 78ch; }
   body #question-dialog { width: min(960px, calc(100% - 24px)); height: min(86dvh, 850px); max-height: 90dvh; margin: auto; border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 20px 80px #102b2340; }
   #question-dialog .question-shell { padding: 0 clamp(14px, 4vw, 40px) 28px; }
   #question-dialog #question-id { color: var(--ink-soft); font-size: 13px; }

@@ -254,7 +254,7 @@ function drawTimeline(box, q, opts) {
   const series = opts.split ? SCEN : [UNCOND];
   const history = q.history.map(([d, v]) => [yearOf(d), v, d]);
   const near = opts.term === "near";
-  const start = opts.size === "headline" ? 2000 : 2008;
+  const start = opts.headline ? 2000 : 2008;
   const historyStart = history.length ? Math.min(Math.max(start, history[0][0]), history.at(-1)[0]) : opts.referenceYear;
   const x0 = Math.min(historyStart, opts.referenceYear, ...horizons.map(z => +z.id));
   const hist = history.filter(p => p[0] >= x0);

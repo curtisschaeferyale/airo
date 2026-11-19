@@ -52,10 +52,14 @@ function viewToggle(where) {
       h("button", { type: "button", title, "aria-pressed": String(hist === v), "data-k": `${where}|view|${v}`,
         onclick: ev => act(ev, () => { v ? historyOf.add(where) : historyOf.delete(where); }) }, text)));
 }
+function chartOptions(q, size) {
+  const headline = q.id in headlineMeasures;
+  return { ...state, size, headline, years: terms[state.term], referenceYear, target: horizonOf(q),
+    view: historyOf.has(headline ? "hero" : "grid") ? "history" : "now", order: D.latest?.models || [] };
+}
 function chartBox(q, size) {
-  const box = h("div", { class: "chart" }), where = size === "headline" ? "hero" : "grid";
-  charts.push(() => drawChart(box, q, { ...state, size, years: terms[state.term], referenceYear, target: horizonOf(q), view: historyOf.has(where) ? "history" : "now",
-    order: D.latest ? D.latest.models : [] }));
+  const box = h("div", { class: "chart" });
+  charts.push(() => drawChart(box, q, chartOptions(q, size)));
   return box;
 }
 function horizonOf(q) {
@@ -116,7 +120,11 @@ function modelTable(q, hz) {
             + " (n=" + median.respondents + ")");
         }))))));
 }
-const rationales = q => q.models.map(m => h("p", {}, h("span", { class: "who" }, m.label + ": "), m.rationale || "No rationale given."));
+function rationales(q) {
+  if (!q.models.length) return [h("p", {}, "No model rationales recorded yet.")];
+  return q.models.map((m, index) => h("details", { class: "model-rationale", open: index === 0 },
+    h("summary", {}, m.label), h("p", {}, m.rationale || "No rationale given.")));
+}
 // Each date whose outcome is in: the outcome, and every forecast with its miss.
 function outcomes(q) {
   const cols = [UNCOND].concat(SCEN), rows = q.horizons.filter(z => z.actual);
@@ -161,6 +169,19 @@ function forecastCard(q, card) {
     const observed = outcomes(q);
     if (observed) views.push(["Outcomes", body => body.append(observed)]);
     forecastDialog.show(opener, q.category, q.short, views);
+    const dialog = document.getElementById("question-dialog");
+    const options = chartOptions(q, "hero");
+    const box = h("div", { class: "chart" });
+    const figure = h("div", { class: "dialog-chart" }, box,
+      legend(q.uncertainty && "80% range", options.view === "history", [q]));
+    dialog.querySelector("#question-views").before(figure);
+    const draw = () => drawChart(box, q, options);
+    draw();
+    window.addEventListener("resize", draw);
+    dialog.addEventListener("close", () => {
+      window.removeEventListener("resize", draw);
+      figure.remove();
+    }, { once: true });
   });
 }
 
@@ -202,12 +223,39 @@ function progress() {
   const sp = p.scenario_probabilities, e = sp?.ensemble;
   const human = HUMAN_PANELS.filter(panel => D.human?.some(row => row.question === "scenario_probabilities" && row.cohort === panel.id));
   const modelDate = formatRunDate(D.latest?.date);
-  const probability = (value, date, count) => h("td", { class: "mono" },
-    value == null ? "–" : [value + "%", forecastDate(date), count && h("small", { class: "sample-size" }, "n=" + count)]);
-  const modelProb = value => probability(value == null ? null : Math.round(value), modelDate);
-  const humanProb = option => human.map(panel => {
-    const row = humanCell("scenario_probabilities", "2030", "unconditional", panel.id, "probability", option);
-    return probability(row?.value, humanSurveyDate, row?.respondents);
+  // A single popup keeps bar segments and table probabilities in sync.
+  const tip = h("div", { id: "progress-tooltip", class: "progress-tooltip", role: "tooltip", hidden: true });
+  let active;
+  function hide() {
+    active?.removeAttribute("aria-describedby");
+    active = null;
+    tip.hidden = true;
+  }
+  function events(sc, value, source) {
+    const show = ev => {
+      hide();
+      active = ev.currentTarget;
+      const summary = D.scenarios.find(item => item.id === sc.id)?.summary;
+      tip.replaceChildren(h("b", {}, sc.label + " · " + value + "%"), h("small", {}, source),
+        ...(summary ? [h("p", {}, summary)] : []));
+      active.setAttribute("aria-describedby", tip.id);
+      tip.hidden = false;
+      const area = tip.offsetParent.getBoundingClientRect(), rect = active.getBoundingClientRect();
+      const left = Math.max(8, Math.min(innerWidth - tip.offsetWidth - 8, rect.left + rect.width / 2 - tip.offsetWidth / 2));
+      tip.style.left = (left - area.left) + "px";
+      tip.style.top = ((rect.top > tip.offsetHeight + 12 ? rect.top - tip.offsetHeight - 6 : rect.bottom + 6) - area.top) + "px";
+    };
+    const leave = ev => { if (active === ev.currentTarget) hide(); };
+    return { onpointerenter: show, onpointerleave: leave, onfocus: show, onblur: leave, onclick: show,
+      onkeydown: ev => { if (ev.key === "Escape") hide(); } };
+  }
+  const probability = (sc, value, date, source, count) => h("td", { class: "mono" },
+    value == null ? "–" : [h("button", { type: "button", class: "probability", ...events(sc, value, source) }, value + "%"),
+      forecastDate(date), count && h("small", { class: "sample-size" }, "n=" + count)]);
+  const modelProb = (sc, value, source) => probability(sc, value == null ? null : Math.round(value), modelDate, source);
+  const humanProb = sc => human.map(panel => {
+    const row = humanCell("scenario_probabilities", "2030", "unconditional", panel.id, "probability", sc.id);
+    return probability(sc, row?.value, humanSurveyDate, panel.label, row?.respondents);
   });
   const fullPanel = Object.fromEntries(SCEN.map(sc => [sc.id,
     humanCell("scenario_probabilities", "2030", "unconditional", "full_panel", "probability", sc.id)?.value]));
@@ -215,8 +263,8 @@ function progress() {
     if (!SCEN.every(sc => values?.[sc.id] != null)) return null;
     const describe = sc => sc.label + " " + values[sc.id] + "%";
     return h("figure", {}, h("figcaption", {}, h("b", {}, label), forecastDate(date)),
-      h("div", { class: "bar", role: "img", "aria-label": label + ". " + SCEN.map(describe).join(", ") },
-        SCEN.map(sc => h("div", { style: `flex: ${values[sc.id]} 0 0; background: ${sc.color}`, title: describe(sc) }))));
+      h("div", { class: "bar", role: "group", "aria-label": label + ". " + SCEN.map(describe).join(", ") },
+        SCEN.map(sc => h("button", { type: "button", "aria-label": describe(sc), style: `flex: ${values[sc.id]} 0 0; background: ${sc.color}`, ...events(sc, values[sc.id], label) }))));
   }
   return h("section", { class: "card ai-progress" }, h("h2", {}, "AI progress by 2030"),
     h("p", { class: "sub" }, "The survey asks which level of AI capability will be reached by the end of 2030."),
@@ -225,9 +273,9 @@ function progress() {
     h("div", { class: "scroll", style: "margin-top: 14px" }, h("table", { class: "tv" },
       h("thead", {}, h("tr", {}, h("th", {}, "Probability"), h("th", {}, "Model panel"), models.map(mo => h("th", {}, mo)), human.map(panel => h("th", {}, panel.label)))),
       h("tbody", {},
-        SCEN.map(sc => h("tr", {}, h("td", {}, sc.label), modelProb(e?.[sc.id]),
-          models.map(mo => modelProb(sp?.models?.[mo]?.[sc.id])), humanProb(sc.id)))))),
-    D.scenarios.filter(sc => sc.summary).map(sc => h("div", { class: "scenario-definition" },
+        SCEN.map(sc => h("tr", {}, h("td", {}, sc.label), modelProb(sc, e?.[sc.id], "Model ensemble"),
+          models.map(mo => modelProb(sc, sp?.models?.[mo]?.[sc.id], mo)), humanProb(sc)))))),
+    tip, D.scenarios.filter(sc => sc.summary).map(sc => h("div", { class: "scenario-definition" },
       h("h3", {}, sc.label), h("p", {}, sc.summary))));
 }
 
