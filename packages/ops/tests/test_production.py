@@ -892,3 +892,20 @@ def test_dashboard_refresh_registration_and_default_schedule(monkeypatch):
     override = dict(job, daily_utc="08:00")
     assert not list(p.due_jobs([override], at))
     assert list(p.due_jobs([override], at.replace(hour=8, minute=0))) == [("survey-evidence-20300101", override)]
+
+
+def test_wait_polls_pinned_commit_until_required_checks_pass(runtime, monkeypatch):
+    runtime.config.update(repository='test', github_repository='example/project')
+    sha = 'b' * 40
+    checks = [{'id': i, 'name': name, 'status': 'completed', 'conclusion': 'success',
+               'app': {'slug': 'github-actions'}} for i, name in enumerate(p.REQUIRED_CHECKS)]
+    replies = iter([[], checks])
+    def answer(argv):
+        if argv[0] == 'gh':
+            assert sha in argv[2]
+            return json.dumps({'check_runs': next(replies)})
+        return sha
+    monkeypatch.setattr(p, 'output', answer)
+    monkeypatch.setattr(p, 'run', lambda *a: None)
+    monkeypatch.setattr(p.time, 'sleep', lambda seconds: None)
+    assert runtime.merged_sha(sha, wait=True) == sha

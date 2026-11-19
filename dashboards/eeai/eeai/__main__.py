@@ -83,8 +83,12 @@ def main(argv=None):
     if args.cmd == "refresh":
         import json
         from . import baselines, resolve
-        print(f"{resolve.refresh()} resolved target(s)")
-        print(json.dumps(baselines.refresh(), indent=2))
+        day = datetime.now(timezone.utc).date()
+        resolved = resolve.refresh(day)
+        # Forecasts read the latest completed dated baseline. Advance it only
+        # once the resolution pass has finished.
+        print(json.dumps(baselines.refresh(day), indent=2))
+        print(f"{resolved} resolved target(s)")
         return 0
     if args.cmd == "resolve":
         from .resolve import refresh

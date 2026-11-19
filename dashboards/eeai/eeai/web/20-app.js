@@ -290,6 +290,14 @@ function download() {
     "⤓ Download data");
 }
 
+function baselineDetails() {
+  const baseline = D.baseline;
+  const label = baseline?.as_of ? `Baseline as of ${baseline.as_of}`
+    : baseline?.source === "survey" ? "Baseline from the original survey"
+    : "Baseline as-of date unavailable";
+  return h("p", { class: "sub" }, label, " · ", h("a", { href: "release.json" }, "Release metadata"));
+}
+
 function render(previous) {
   charts.length = 0;
   // Hold the page's height while it is rebuilt: a chart measures its box as it
@@ -319,7 +327,8 @@ function render(previous) {
     hasForecasts && progress(),
     D.download && h("section", { class: "card" }, h("div", { class: "head" },
       h("div", {}, h("h2", {}, "Download data"),
-        h("p", { class: "sub", style: "color: var(--ink-soft); margin: 4px 0 0; max-width: 640px" }, "Every forecast from every model in every run, each model's rationale, the questions, and the run files with every search and page read.")),
+        h("p", { class: "sub", style: "color: var(--ink-soft); margin: 4px 0 0; max-width: 640px" }, "Every forecast from every model in every run, each model's rationale, the questions, and the run files with every search and page read."),
+        baselineDetails()),
       download())),
     h("footer", {}, "Questions and scenario definitions are from the Forecasting Research Institute's Economic Effects of AI survey. ",
       "The panel is the four highest-ranked models on Epoch's Capabilities Index that FRI can run, one per model family. ",

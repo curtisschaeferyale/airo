@@ -189,9 +189,24 @@ for separate reviewed releases on the same date. Corrections use the explicit
 `decide` command and retain the prior evidence.
 
 The schedule in `packages/ops/jobs.json` requests a daily 15:15 UTC economic
-refresh and verified site rebuild. This job uses existing forecast runs and
-makes no model calls. Production activation follows the shared deployment
-guide and requires FRED access from the scheduled runtime.
+refresh and verified site rebuild. It is the automatic ingestion and
+resolution trigger for EEAI. Each question's rule controls evidence selection
+within that job. The forecast runner reads the last completed local baseline
+and makes no FRED requests. The refresh uses existing forecast runs and
+makes no model calls. If an upstream resolution check fails, the dated
+baseline stays at its last completed version. Frozen decisions are retained
+as evidence. Production activation follows the shared deployment
+guide and requires FRED access from the scheduled runtime. See the
+[EEAI operator pilot](../../packages/ops/DASHBOARDS.md#eeai-operator-pilot)
+for scheduler diagnostics, verified refresh and recovery.
+
+New builds report the as-of date of the dated FRED file used for the
+baseline. This is the source vintage cutoff for the refresh. The survey seed
+has no as-of date. The page data and the ZIP's `baseline.json` describe the
+same `history.csv` bytes. A frontend-only deploy keeps the previously
+published data block and ZIP, so a legacy publication without baseline
+provenance displays an unavailable date. The download card links to the
+live site's `release.json`.
 
 ## Open
 
