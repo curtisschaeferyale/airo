@@ -23,7 +23,12 @@ const charts = [];
 // the screen (the page above it may have changed height) and focused.
 function act(ev, change) {
   const k = ev.currentTarget.dataset.k, top = ev.currentTarget.getBoundingClientRect().top;
-  change(); render(); remember();
+  const oldTerm = state.term;
+  change();
+  const zoom = state.term !== oldTerm && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const previous = zoom ? new Map([...root.querySelectorAll(".chart[data-timeline]")].map(box =>
+    [box.dataset.timeline, box.readTimeScale()])) : null;
+  render(previous); remember();
   const b = [...root.querySelectorAll("[data-k]")].find(b => b.dataset.k === k);
   if (!b) return;
   window.scrollBy(0, b.getBoundingClientRect().top - top);
@@ -59,7 +64,7 @@ function chartOptions(q, size) {
 }
 function chartBox(q, size) {
   const box = h("div", { class: "chart" });
-  charts.push(() => drawChart(box, q, chartOptions(q, size)));
+  charts.push(previous => drawChart(box, q, { ...chartOptions(q, size), previousScale: previous?.get(q.id) }));
   return box;
 }
 function horizonOf(q) {
@@ -283,7 +288,7 @@ function download() {
     "⤓ Download data");
 }
 
-function render() {
+function render(previous) {
   charts.length = 0;
   // Hold the page's height while it is rebuilt: a chart measures its box as it
   // is drawn, and a page that is briefly shorter would lose its scroll position.
@@ -317,7 +322,7 @@ function render() {
     h("footer", {}, "Questions and scenario definitions are from the Forecasting Research Institute's Economic Effects of AI survey. ",
       "The panel is the four highest-ranked models on Epoch's Capabilities Index that FRI can run, one per model family. ",
       "Once an outcome is available, its table shows the forecast median minus the outcome. Conditional forecasts are scored when the AI scenario is known.")].filter(Boolean));
-  for (const draw of charts) draw();
+  for (const draw of charts) draw(previous);
   root.style.minHeight = "";
 }
 let timer;

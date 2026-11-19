@@ -128,7 +128,7 @@ function frame(box, q, size, x0, x1, ys, surveyLane = false) {
   svg.append(s("line", { x1: axisLeft, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: "var(--line)" }));
   const path = pts => pts.map((p, i) => (i ? "L" : "M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1)).join(" ");
   return { svg, X, Y, W, H, m, hero, labels, x0, x1, path, surveyX, traces: [],
-    tick: (x, text) => svg.append(s("text", { x: X(x), y: H - 6, "text-anchor": "middle" }, text)),
+    tick: (x, text) => svg.append(s("text", { class: "time-tick", x: X(x), y: H - 6, "text-anchor": "middle" }, text)),
     // (class "fc": a forecast mark; the page fades those in when a control redraws the chart)
     dot: (x, y, sc, ring) => svg.append(s("circle", { class: "fc", cx: X(x), cy: Y(y), r: hero ? 4.5 : 3.5,
       fill: ring ? "var(--panel)" : sc.color, stroke: ring ? sc.color : "var(--panel)", "stroke-width": 2 })) };
@@ -247,6 +247,34 @@ function drawChart(box, q, opts) {
   return opts.view === "history" ? drawHistory(box, q, opts) : drawTimeline(box, q, opts);
 }
 
+// Project the new timeline through the previous time scale, then ease it into
+// place. Translate individual marks so circles and labels keep their shape.
+function zoomTimeline(box, f, previous) {
+  const scale = (previous(f.x1) - previous(f.x0)) / (f.X(f.x1) - f.X(f.x0));
+  const shift = previous(f.x0) - scale * f.X(f.x0);
+  if (Math.abs(scale - 1) < .001 && Math.abs(shift) < .1) return;
+  const timing = { duration: 440, easing: "cubic-bezier(.22,.68,.2,1)" };
+  const svg = f.svg;
+  svg.classList.add("zooming");
+  let animation;
+  for (const el of svg.querySelectorAll("circle, .time-tick, text.end, path:not([data-series]), line.fc")) {
+    const coord = el.getAttribute("cx") ?? el.getAttribute("x") ?? el.getAttribute("x1");
+    const from = coord == null ? `matrix(${scale},0,0,1,${shift},0)`
+      : `translateX(${(scale - 1) * Number(coord) + shift}px)`;
+    animation = el.animate([{ transform: from }, { transform: "none" }], timing);
+  }
+  if (animation) {
+    box.readTimeScale = () => {
+      const progress = animation.effect.getComputedTiming().progress ?? 0;
+      return year => previous(year) * (1 - progress) + f.X(year) * progress;
+    };
+    animation.onfinish = () => {
+      svg.classList.remove("zooming");
+      if (svg.parentNode === box) box.readTimeScale = () => f.X;
+    };
+  } else svg.classList.remove("zooming");
+}
+
 function drawTimeline(box, q, opts) {
   const hero = opts.size === "hero";
   const horizons = q.horizons.filter(z => opts.years.includes(z.id));
@@ -314,6 +342,8 @@ function drawTimeline(box, q, opts) {
     const x = +hz.id;
     byDate.set(x, { ...byDate.get(x), x, hz });
   }
+  box.dataset.timeline = q.id;
+  box.readTimeScale = () => X;
   const kind = opts.split ? "" : " · unconditional";
   hover(f, box, [...byDate.values()], st => {
     if (!st.hz) return [h("b", {}, st.hist[2].slice(0, 4)), tipRow("Actual", fmt(q, st.hist[1]))];
@@ -330,6 +360,7 @@ function drawTimeline(box, q, opts) {
       }),
       z.asked && tipRow("Forecast made", z.asked)];
   });
+  if (opts.previousScale) zoomTimeline(box, f, opts.previousScale);
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
