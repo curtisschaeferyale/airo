@@ -101,10 +101,10 @@ straight lines. A recorded outcome appears alongside the forecast. The table
 shows the signed error for unconditional forecasts and for the realized AI
 scenario once FRI records its end-of-2030 decision.
 
-The headline charts for real GDP growth, youth unemployment (ages 20–24), and the wealth share of the top 10% share a Current/History toggle. The remaining indicators have their own toggle. Current
+The headline charts for real GDP growth, labor force participation, and the wealth share of the top 10% share a Current/History toggle. The remaining indicators have their own toggle. Current
 shows forecasts by target year. History tracks one target across forecast
 runs and shows the outcome once available. The horizon and AI progress
-controls apply across both chart areas. Near-term covers the five calendar
+controls apply across both chart areas. A fresh visit opens on the long-term view with 2050 selected and forecasts conditional on AI progress. Near-term covers the five calendar
 years after the latest run. Long-term shows the original 2030 and 2050
 targets. History includes a year selector within the chosen window.
 The page address preserves these choices (for example,
