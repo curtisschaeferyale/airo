@@ -14,7 +14,8 @@ import json
 from pathlib import Path
 
 from . import config, survey as S
-from dashboard import download, human_forecasts
+from dashboard import download
+from .human import encode as encode_human_summary
 
 NAME = "eeai-data.zip"
 FORECAST_COLUMNS = ["run_id", "run_date", "model", "model_id", "question_id", "question", "unit",
@@ -87,7 +88,7 @@ def bundle(out, survey, runs, runs_dir=None, outcomes=None, history_bytes=None, 
         readme += f"\nHuman forecasts are cohort aggregates from the original EEAI survey. Warehouse extract dated {vintage}.\n"
     return download.bundle(out, [
         ("README.md", readme),
-        *([("human_forecasts.csv", human_forecasts.encode(human))] if human else []),
+        *([("human_forecasts.csv", encode_human_summary(human))] if human else []),
         ("forecasts.csv", download.csv_text(FORECAST_COLUMNS, forecast_lines(survey, runs))),
         ("rationales.csv", download.csv_text(RATIONALE_COLUMNS, rationale_lines(survey, runs))),
         ("ai_progress.csv", download.csv_text(PROGRESS_COLUMNS, progress_lines(runs))),
