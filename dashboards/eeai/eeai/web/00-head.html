@@ -142,6 +142,36 @@
   .seg button.just, .mini button.just { animation: press .22s ease; }
   .chart svg .fc, .chart svg text.end { animation: fade .32s ease both; }
   .still .chart svg .fc, .still .chart svg text.end { animation: none; }
+  .source-group { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .065em; }
+  .tip .who .source-group { grid-column: 1 / -1; justify-self: stretch; text-align: left; margin: 5px 0 2px; padding-top: 5px; border-top: 1px solid #ffffff38; color: #d4e2da; }
+  .tip { background: #202c27; border-radius: 10px; box-shadow: 0 8px 28px #102b2326; }
+  .tile:has(.tip:not([hidden])) { position: relative; z-index: 2; }
+  .scenario-bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 275px), 1fr)); gap: 18px 28px; }
+  .scenario-bars figure { margin: 0; min-width: 0; }
+  .scenario-bars figcaption { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+  .scenario-bars .bar div { min-width: 0; }
+  body #question-dialog { width: min(960px, calc(100% - 24px)); height: min(86dvh, 850px); max-height: 90dvh; margin: auto; border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 20px 80px #102b2340; }
+  #question-dialog .question-shell { padding: 0 clamp(14px, 4vw, 40px) 28px; }
+  #question-dialog #question-id { color: var(--ink-soft); font-size: 13px; }
+  #question-dialog #question-views { gap: 2px; }
+  #question-dialog #question-views button { font: inherit; font-size: 14px; border: 0; border-bottom: 2px solid transparent; }
+  #question-dialog #question-views button[aria-pressed=true] { border-color: var(--link); color: var(--link); font-weight: 600; }
+  #question-dialog button:hover { background: var(--well); }
+  #question-content .scroll { border: 1px solid var(--line); border-radius: 10px; margin: 16px 0; }
+  #question-content table.tv { margin: 0; }
+  #question-content .tv th, #question-content .tv td { padding: 7px 10px; }
+  #question-content .tv thead { background: var(--well); }
+  #question-content .tv thead th:first-child { color: var(--ink); font-size: 16px; }
+  #question-content .source-group th { color: var(--link); }
+  #question-content .source-group .forecast-date { display: inline; margin-left: 10px; text-transform: none; letter-spacing: normal; }
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes reveal { from { opacity: 0; transform: translateY(4px); } }
+    .forecast-card, #question-dialog button { transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease; }
+    .forecast-card:is(:hover,:focus-within) { box-shadow: 0 3px 12px #102b2314; }
+    #question-dialog[open] { animation: reveal .18s ease-out; }
+    #question-content > :first-child, .tip:not([hidden]) { animation: reveal .13s ease-out; }
+    #question-dialog[open]::backdrop { animation: fade .18s ease-out; }
+  }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after, dialog::backdrop { animation: none !important; transition: none !important; }
   }

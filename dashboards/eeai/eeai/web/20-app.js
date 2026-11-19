@@ -98,10 +98,11 @@ function modelTable(q, hz) {
   const panels = HUMAN_PANELS.filter(panel => cols.some(sc => humanCell(q.id, hz, sc, panel.id)));
   const hasMedian = cols.some(sc => val(q, hz, sc) != null);
   if (!hasMedian && !modelRows.length && !panels.length) return null;
+  const group = (title, date) => h("tr", { class: "source-group" },
+    h("th", { colspan: 5, scope: "rowgroup" }, title, forecastDate(date)));
   return h("div", { class: "scroll" }, h("table", { class: "tv" },
     h("thead", {}, h("tr", {}, h("th", {}, `${hz}`), h("th", {}, "Unconditional"), h("th", {}, "Slow"), h("th", {}, "Moderate"), h("th", {}, "Rapid"))),
-    h("tbody", {},
-      hasMedian && h("tr", {}, h("td", {}, h("b", {}, "Model panel median")), cols.map(c => h("td", { class: "mono" }, ens(c)))),
+    panels.length > 0 && h("tbody", {}, group("Human forecasts", humanSurveyDate),
       panels.map(panel =>
         h("tr", {}, h("th", { scope: "row" }, panel.label), cols.map(sc => {
           const at = stat => humanCell(q.id, hz, sc, panel.id, stat);
@@ -110,7 +111,9 @@ function modelTable(q, hz) {
           const lo = at("p10"), hi = at("p90");
           return h("td", { class: "mono" }, withRange(q, Number(median.value), lo && Number(lo.value), hi && Number(hi.value))
             + " (n=" + median.respondents + ")");
-        }))),
+        })))),
+    (hasMedian || modelRows.length > 0) && h("tbody", {}, group("Model forecasts", formatRunDate(runFor(q, hz).date)),
+      hasMedian && h("tr", {}, h("td", {}, h("b", {}, "Model panel median")), cols.map(c => h("td", { class: "mono" }, ens(c)))),
       modelRows.map(([label, forecasts]) => h("tr", {}, h("td", {}, label), cols.map(c => h("td", { class: "mono" }, cell(forecasts, c))))))));
 }
 const rationales = q => q.models.map(m => h("p", {}, h("span", { class: "who" }, m.label + ": "), m.rationale || "No rationale given."));
@@ -207,11 +210,21 @@ function progress() {
     const row = humanCell("scenario_probabilities", "2030", "unconditional", panel.id, "probability", option);
     return probability(row?.value, humanSurveyDate, row?.respondents);
   });
+  const fullPanel = Object.fromEntries(SCEN.map(sc => [sc.id,
+    humanCell("scenario_probabilities", "2030", "unconditional", "full_panel", "probability", sc.id)?.value]));
+  function scenarioBar(label, values, date) {
+    if (!SCEN.every(sc => values?.[sc.id] != null)) return null;
+    const describe = sc => sc.label + " " + values[sc.id] + "%";
+    return h("figure", {}, h("figcaption", {}, h("b", {}, label), forecastDate(date)),
+      h("div", { class: "bar", role: "img", "aria-label": label + ". " + SCEN.map(describe).join(", ") },
+        SCEN.map(sc => h("div", { style: `flex: ${values[sc.id]} 0 0; background: ${sc.color}`, title: describe(sc) }))),
+      h("div", { class: "legend" }, SCEN.map(sc => h("span", {},
+        h("i", { class: "sw dot", style: `color: ${sc.color}` }), sc.label.split(" ")[0] + " " + pct(values[sc.id])))));
+  }
   return h("section", { class: "card ai-progress" }, h("h2", {}, "AI progress by 2030"),
     h("p", { class: "sub" }, "The survey asks which level of AI capability will be reached by the end of 2030."),
-    e && h("div", { class: "bar", role: "img", "aria-label": `Slow ${pct(e.slow)}, moderate ${pct(e.moderate)}, rapid ${pct(e.rapid)}` },
-      SCEN.map(sc => h("div", { style: `flex: ${e[sc.id]} 0 0; background: ${sc.color}`, title: `${sc.label}: ${pct(e[sc.id])}` }))),
-    e && h("div", { class: "legend" }, SCEN.map(sc => h("span", {}, h("i", { class: "sw dot", style: `color: ${sc.color}` }), `${sc.label} ${pct(e[sc.id])}`))),
+    h("div", { class: "scenario-bars" }, scenarioBar("Full human panel", fullPanel, humanSurveyDate),
+      scenarioBar("Model ensemble", e, modelDate)),
     h("div", { class: "scroll", style: "margin-top: 14px" }, h("table", { class: "tv" },
       h("thead", {}, h("tr", {}, h("th", {}, "Probability"), h("th", {}, "Model panel"), human.map(panel => h("th", {}, panel.label)), models.map(mo => h("th", {}, mo)))),
       h("tbody", {},

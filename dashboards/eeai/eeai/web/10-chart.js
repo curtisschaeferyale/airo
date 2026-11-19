@@ -167,17 +167,21 @@ function breakdown(q, series, hz, run = {}, order, detail) {
   const number = (cell, extra, bold) => tipNumber(q, cell?.p50,
     [rangeText(q, cell?.p10, cell?.p90), extra].filter(Boolean).join(" "), bold);
   const ensemble = run.ensemble?.[hz];
-  if (series.some(sc => ensemble?.[sc.id]?.p50 != null)) grid.append(label("Model panel median", date, true),
-    ...series.map(sc => number(ensemble[sc.id], detail?.(sc), true)));
-  for (const panel of HUMAN_PANELS) {
+  const group = text => h("span", { class: "source-group" }, text);
+  const panels = HUMAN_PANELS.filter(panel => series.some(sc => humanCell(q.id, hz, sc.id, panel.id)));
+  if (panels.length) grid.append(group("Human forecasts"));
+  for (const panel of panels) {
     const at = (sc, stat) => humanCell(q.id, hz, sc.id, panel.id, stat);
-    if (!series.some(sc => at(sc))) continue;
     grid.append(label(panel.label, humanSurveyDate, panel.id === "superforecaster"), ...series.map(sc => {
       const row = at(sc), lo = at(sc, "p10"), hi = at(sc, "p90");
       return tipNumber(q, row && Number(row.value), row && [rangeText(q, lo && Number(lo.value), hi && Number(hi.value)),
         "n=" + row.respondents].filter(Boolean).join(" "));
     }));
   }
+  const hasMedian = series.some(sc => ensemble?.[sc.id]?.p50 != null);
+  if (hasMedian || labels.length) grid.append(group("Model forecasts"));
+  if (hasMedian) grid.append(label("Model panel median", date, true),
+    ...series.map(sc => number(ensemble[sc.id], detail?.(sc), true)));
   for (const m of labels) grid.append(label(m, date), ...series.map(sc => number(models[m]?.[hz]?.[sc.id])));
   return grid;
 }
