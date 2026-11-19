@@ -92,6 +92,7 @@ def build(survey=None, history=None, runs=None, outcomes=None):
     scenario_rule = survey["scenarios"].get("resolution")
     scenario = outcomes.get(("ai_scenario", "2030", scenario_rule["version"])) if scenario_rule else None
     blob["realized_scenario"] = scenario["value"] if scenario else None
+    blob["latest_realized_scenario"] = (scenario.get("revisions") or [scenario])[-1]["value"] if scenario else None
     per_run = []
     for run_id, rows in runs:
         calls = [(r["label"], r["call"]) for r in rows if r.get("call")]
@@ -190,11 +191,13 @@ def main(args):
                     or any(row.get("synthetic") or row["run_id"] != run_id for row in rows)):
                 raise ValueError(f"EEAI publication requires a complete real panel for {run_id}")
     from dashboard import resolutions
-    outcomes = resolutions.snapshot(config.RESULTS / "resolutions.sqlite")
+    snapshot_id, histories = resolutions.history(config.RESULTS / "resolutions.sqlite")
+    outcomes = resolutions.project(histories)
     from . import baselines
     history_bytes = baselines.current().read_bytes()
     history = S.read_history(io.StringIO(history_bytes.decode()))
     blob = build(survey, history=history, runs=runs, outcomes=outcomes)
+    blob["outcome_snapshot_id"] = snapshot_id
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)

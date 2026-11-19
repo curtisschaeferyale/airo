@@ -229,3 +229,12 @@ asset directories. Declare external downloads in `downloads` for hashing and
 in `required` when every valid publication must contain them. Keep private
 inputs, raw attempts, passwords and receipts outside the site. Follow the
 same config, hosting and schedule steps above.
+
+### Scheduled resolution
+
+To opt in, set the dashboard's `refresh` command in `dashboard_projects.py`
+and add a `refresh` job for it in `jobs.json`. The default cadence for that
+job is daily at 15:15 UTC. Set `daily_utc`, `weekly_utc` or `at` to override
+it. The command reads source evidence and saves outcomes. The scheduler then
+rebuilds and verifies the page using the dashboard's existing forecast runs.
+EEAI's command also refreshes its historical baseline.

@@ -1,10 +1,10 @@
-"""Resolve EEAI targets against the first FRED vintage with complete evidence."""
+"""Resolve EEAI targets against the FRED vintages with complete evidence."""
 import json
 import math
 import os
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
@@ -22,7 +22,7 @@ def dates(method, year):
     raise ValueError(f"Unknown resolution method {method}")
 
 
-def fetch(series, periods, as_of, *, latest=False):
+def fetch(series, periods, as_of, *, latest=False, since=None):
     from fri_forecaster import keys
     key = keys.value("FRED_API_KEY")
     if not key and os.environ.get("FRED_API_KEY_FILE"):
@@ -31,7 +31,7 @@ def fetch(series, periods, as_of, *, latest=False):
         raise ValueError("Set FRED_API_KEY or FRED_API_KEY_FILE to read economic observations")
     query = urlencode(dict(series_id=series, api_key=key, file_type="json",
                            observation_start=periods[0], observation_end=periods[-1],
-                           realtime_start=as_of if latest else periods[0], realtime_end=as_of))
+                           realtime_start=as_of if latest else (since or periods[0]), realtime_end=as_of))
     try:
         with urlopen("https://api.stlouisfed.org/fred/series/observations?" + query, timeout=30) as response:
             data = json.load(response)
@@ -88,12 +88,13 @@ def calculate(rule, values, periods):
     raise ValueError(f"Unknown method {method}")
 
 
-def outcome_for(q, periods, evidence, as_of):
+def outcome_history(q, periods, evidence, as_of):
     rule = q["resolution"]
     required = {key: input_dates(rule, key, periods) for key in source_ids(rule)}
     rows = {key: [r for r in evidence[key] if r["date"] in dates and r["value"] != "."]
             for key, dates in required.items()}
     vintages = sorted({r["realtime_start"] for values in rows.values() for r in values})
+    last_value = None
     for vintage in vintages:
         if vintage > as_of:
             break
@@ -107,45 +108,81 @@ def outcome_for(q, periods, evidence, as_of):
         value = calculate(rule, inputs, periods)
         if not q["bounds"][0] <= value <= q["bounds"][1]:
             raise ValueError(f"Outcome outside question bounds: {value}")
+        if last_value == value:
+            continue
+        last_value = value
         if len(inputs) == 1:
             key, = inputs
-            return dict(value=value, unit=q["unit"], vintage=vintage, inputs=inputs[key],
-                        source="https://fred.stlouisfed.org/series/" + key)
-        return dict(value=value, unit=q["unit"], vintage=vintage, inputs=inputs,
-                    sources=["https://fred.stlouisfed.org/series/" + key for key in inputs])
-    return None
+            yield dict(value=value, unit=q["unit"], vintage=vintage, inputs=inputs[key],
+                       source="https://fred.stlouisfed.org/series/" + key)
+        else:
+            yield dict(value=value, unit=q["unit"], vintage=vintage, inputs=inputs,
+                       sources=["https://fred.stlouisfed.org/series/" + key for key in inputs])
 
 
-def read_target(q, periods, day, reader=fetch):
+def outcome_for(q, periods, evidence, as_of):
+    return next(outcome_history(q, periods, evidence, as_of), None)
+
+
+def read_target(q, periods, day, reader=fetch, *, history=False):
     rule = q["resolution"]
     evidence = {key: reader(key, input_dates(rule, key, periods), day) for key in source_ids(rule)}
-    return outcome_for(q, periods, evidence, day)
+    records = outcome_history(q, periods, evidence, day)
+    return list(records) if history else next(records, None)
+
+
+class FredResolver:
+    def __init__(self, reader=fetch):
+        self.reader = reader
+
+    def refresh(self, requests, *, as_of, after):
+        day = as_of.isoformat()
+        signatures = [[*r.target, r.rule] for r in requests]
+        bookmark = after["day"] if after and signatures == after["targets"] else None
+        if after and day < after["day"]:
+            raise ValueError("Cannot rewind a refresh; use replay for historical inspection")
+        # One extra day establishes the value immediately before the bookmark.
+        # Otherwise FRED clips realtime_start and unchanged inputs look newly published.
+        since = (date.fromisoformat(bookmark) - timedelta(days=1)).isoformat() if bookmark else None
+        windows = {}
+        for request in requests:
+            periods = dates(request.rule["method"], int(request.target.horizon))
+            for key in source_ids(request.rule):
+                windows.setdefault(key, set()).update(input_dates(request.rule, key, periods))
+        options = {"since": since} if since else {}
+        evidence = {key: self.reader(key, sorted(periods), day, **options) for key, periods in windows.items()}
+        observations = []
+        for request in requests:
+            periods = dates(request.rule["method"], int(request.target.horizon))
+            for outcome in outcome_history(request.params, periods, evidence, day):
+                vintage = outcome.pop("vintage")
+                if bookmark and vintage < bookmark:
+                    continue
+                observations.append(resolutions.Observation(
+                    request.target, vintage, vintage, outcome.pop("value"), outcome))
+        return resolutions.RefreshBatch(observations, {"day": day, "targets": signatures})
 
 
 def refresh(as_of=None, reader=fetch, path=None):
+    from .decisions import ReviewedResolver
+
     as_of = as_of or datetime.now(timezone.utc).date()
     path = path or config.RESULTS / "resolutions.sqlite"
-    existing = resolutions.snapshot(path)
-    total = 0
-    for q in survey.load()["questions"]:
-        if "resolution" not in q:
-            continue
-        rule = q["resolution"]
-        if rule["method"] == "adjudicated":
-            continue
-        for h in q["horizons"]:
-            year = int(h["id"])
-            if date(year, 1, 1) > as_of:
-                continue
-            prior = existing.get((q["id"], h["id"], rule["version"]))
-            if prior:
-                if prior["rule"] != rule:
-                    raise ValueError(f"Rule changed without a version bump for {q['id']}")
-                total += 1
-                continue
-            periods = dates(rule["method"], year)
-            outcome = read_target(q, periods, as_of.isoformat(), reader)
-            if outcome:
-                resolutions.record(path, q["id"], h["id"], rule, outcome)
-                total += 1
-    return total
+    doc = survey.load()
+    questions = list(doc["questions"])
+    if "scenarios" in doc:
+        questions.append({"id": "ai_scenario", "resolver": "reviewed", "resolution": doc["scenarios"]["resolution"],
+                          "horizons": [{"id": "2030"}]})
+    requests = []
+    for q in questions:
+        rules = [q["resolution"], *q.get("previous_rules", {}).values()]
+        for rule in rules:
+            for horizon in q["horizons"]:
+                year = horizon["id"]
+                if date(int(year), 1, 1) <= as_of:
+                    target = resolutions.Target(q["id"], year, rule["version"])
+                    plugin = rule.get("resolver", q["resolver"])
+                    requests.append(resolutions.Request(target, plugin, rule, dict(q, resolution=rule)))
+    plugins = {"fred": FredResolver(reader), "reviewed": ReviewedResolver(config.RESULTS / "reviewed", doc)}
+    resolutions.refresh(path, requests, plugins, as_of=as_of)
+    return len(resolutions.snapshot(path))

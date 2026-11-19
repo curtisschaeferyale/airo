@@ -45,12 +45,13 @@ def main(argv=None):
     b.add_argument("--out", help="write only the page, to this file (and the download beside it)")
     b.add_argument("--json", help="also write the page's data here")
     b.add_argument("--site", help="the site folder to write (default eeai/site): index.html, the download, web/")
-    sub.add_parser("resolve", help="record due FRED outcomes under EEAI_RESULTS")
+    sub.add_parser("resolve", help="record due source revisions and reviewed outcomes under EEAI_RESULTS")
     sub.add_parser("refresh", help="refresh economic baselines and check due outcomes")
     replay = sub.add_parser("replay", help="inspect a historical FRED target without storing it")
     replay.add_argument("question")
     replay.add_argument("year", type=int)
     replay.add_argument("--as-of", required=True, type=date.fromisoformat)
+    replay.add_argument("--history", action="store_true", help="show every distinct source vintage value")
     decision = sub.add_parser("decide", help="record an adjudication or a correction")
     decision.add_argument("file")
     args = ap.parse_args(argv)
@@ -58,14 +59,14 @@ def main(argv=None):
         import json
         from . import resolve
         q = next((q for q in S.load()["questions"] if q["id"] == args.question), None)
-        if not q or q["resolution"]["method"] == "adjudicated":
+        if not q or q["resolver"] != "fred":
             ap.error("replay requires an automated economic question")
         periods = resolve.dates(q["resolution"]["method"], args.year)
         day = args.as_of.isoformat()
-        got = None
+        got = [] if args.history else None
         if day >= periods[0]:
-            got = resolve.read_target(q, periods, day)
-        print(json.dumps(got or {"status": "awaiting_evidence"}, indent=2))
+            got = resolve.read_target(q, periods, day, history=args.history)
+        print(json.dumps(got if got is not None else {"status": "awaiting_evidence"}, indent=2))
         return 0
     if args.cmd == "decide":
         from .decisions import apply
@@ -74,8 +75,8 @@ def main(argv=None):
     if args.cmd == "refresh":
         import json
         from . import baselines, resolve
-        print(json.dumps(baselines.refresh(), indent=2))
         print(f"{resolve.refresh()} resolved target(s)")
+        print(json.dumps(baselines.refresh(), indent=2))
         return 0
     if args.cmd == "resolve":
         from .resolve import refresh

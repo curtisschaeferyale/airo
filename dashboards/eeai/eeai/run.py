@@ -107,6 +107,7 @@ def main(args):
     today = date.fromisoformat(args.today) if args.today else datetime.now(timezone.utc).date()
     from .baselines import current
     history = S.history(current(today))
+    input_snapshot = {"baseline_sha256": hashlib.sha256(json.dumps(history, sort_keys=True).encode()).hexdigest()}
     members, provenance = select_members(args)
     harness_run = None
     if args.synthetic:
@@ -135,6 +136,7 @@ def main(args):
             have = [json.loads(line) for line in f if line.strip()]
         today = date.fromisoformat(have[0]["run_date"])
         original_call = next(r["call"] for r in have if r.get("call"))
+        input_snapshot = have[0].get("input_snapshot")
         survey = original_call.get("question_set") or dict(survey, instrument=have[0]["instrument"])
         history = original_call.get("history") or S.history(config.HISTORY)
         restored, _ = instrument.build_prompt(survey, history, today)
@@ -156,6 +158,8 @@ def main(args):
                    harness_run=harness_run, synthetic=args.synthetic)
         with lock, open(path, "a", encoding="utf-8") as f:
             for r in rows:
+                if input_snapshot is not None:
+                    r["input_snapshot"] = input_snapshot
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
         return rows
 
