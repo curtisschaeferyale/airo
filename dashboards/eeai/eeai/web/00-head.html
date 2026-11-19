@@ -146,7 +146,7 @@
   .tip .who .source-group { grid-column: 1 / -1; justify-self: stretch; text-align: left; margin: 5px 0 2px; padding-top: 5px; border-top: 1px solid #ffffff38; color: #d4e2da; }
   .tip { background: #202c27; border-radius: 10px; box-shadow: 0 8px 28px #102b2326; }
   .tile:has(.tip:not([hidden])) { position: relative; z-index: 2; }
-  .scenario-bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 275px), 1fr)); gap: 18px 28px; }
+  .scenario-bars { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .scenario-bars figure { margin: 0; min-width: 0; }
   .scenario-bars figcaption { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
   .scenario-bars .bar div { min-width: 0; }
