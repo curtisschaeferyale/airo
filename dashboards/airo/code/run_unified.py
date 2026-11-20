@@ -1166,16 +1166,28 @@ def clean_forecasts_joint(raw, allowed, horizons, scenario_ids):
     return out or None
 
 
-def validate_before_explanation(answer, allowed, horizons, scenario_ids, elicits):
-    """Refuse an invalid final submission before revealing previous forecasts."""
+def check_forecast_submission(answer, allowed, horizons, scenario_ids, elicits):
+    """Clean a submission and check the shared completeness requirements.
+
+    Return grids, elicited quantities, received/expected counts, and problems.
+    Used both before locking forecasts and when the runner reads them back.
+    """
     grids = clean_forecasts_joint(answer.get("forecasts"), allowed, horizons, scenario_ids) or {}
+    elicited = ({e["key"]: clean_elicit(answer.get(e["key"]), e) for e in elicits}
+                if elicits else None)
     got = sum(len(v) for grid in grids.values() for v in grid.values())
     want = sum(map(len, allowed.values())) * (1 + len(scenario_ids))
     problems = []
     if got < MIN_FORECAST_COVERAGE * want:
         problems.append(f"Incomplete forecast grid: {got}/{want} probabilities.")
-    if any(clean_elicit(answer.get(e["key"]), e) is None for e in elicits):
+    if elicited and not all(elicited.values()):
         problems.append("Required elicited quantities are missing or invalid.")
+    return grids, elicited, got, want, problems
+
+
+def validate_before_explanation(answer, allowed, horizons, scenario_ids, elicits):
+    """Refuse an invalid final submission before revealing previous forecasts."""
+    grids, _, _, _, problems = check_forecast_submission(answer, allowed, horizons, scenario_ids, elicits)
     for qid in CATASTROPHE_RATIONALE_QIDS:
         if qid in allowed and {f["horizon"] for f in grids.get(UNCONDITIONAL_KEY, {}).get(qid, [])} != set(allowed[qid]):
             problems.append(f"{qid}: all unconditional horizons are required before explaining them.")
@@ -1259,7 +1271,6 @@ def run_one_joint(label, model_id, groups, by_group, horizons, run_id, retries, 
     qids = [q["id"] for g in groups for q in by_group[g["key"]]]
     allowed = {q["id"]: {h for h in horizons if h in q["horizons"]}
                for g in groups for q in by_group[g["key"]]}
-    want = want_cells * (len(scenarios) + 1)
     elicits = set_elicits(policies)
     comparisons = {}
     if post_forecast:
@@ -1333,11 +1344,9 @@ def run_one_joint(label, model_id, groups, by_group, horizons, run_id, retries, 
                 merged[(f["question_id"], f["horizon"])] = f
                 delivery["cells_in_final"] += 1
         answer["forecasts"] = list(merged.values())
-        grids = clean_forecasts_joint(answer.get("forecasts"), allowed, horizons, scenario_ids)
-        got = sum(len(v) for g in (grids or {}).values() for v in g.values())
-        elicited = ({e["key"]: clean_elicit(answer.get(e["key"]), e) for e in elicits}
-                    if elicits else None)
-        if grids and got >= MIN_FORECAST_COVERAGE * want and (not elicits or all(elicited.values())):
+        grids, elicited, got, want, problems = check_forecast_submission(
+            answer, allowed, horizons, scenario_ids, elicits)
+        if grids and not problems:
             break
         print(f"  retry {label:16} attempt {attempts}: {got}/{want} cells x (unconditional + scenarios)"
               + "".join(f", {k} {'ok' if v else 'missing/unordered'}"

@@ -117,6 +117,28 @@ def test_validate_before_explaining_requires_headline_cells():
     assert "finite" in " ".join(ru.validate_before_explanation({"forecasts": cells}, **args))
 
 
+@pytest.mark.parametrize("delivered,estimate,rejected", [
+    (9, {"lower": 0, "upper": 0.5}, False),  # exactly 90% is still accepted
+    (8, {"lower": 0, "upper": 0.5}, True),
+    (0, {"lower": 0, "upper": 0.5}, True),
+    (10, None, True),
+    (10, {"lower": 0}, True),
+    (10, {"lower": 0.5, "upper": 0.2}, True),
+])
+def test_shared_submission_checks_preserve_acceptance_rules(delivered, estimate, rejected):
+    allowed = {f"example:{i}": ["6mo"] for i in range(10)}
+    cells = [{"question_id": qid, "horizon": "6mo",
+              "probabilities": {"unconditional": 0.1, "policy": 0.2}}
+             for qid in list(allowed)[:delivered]]
+    args = dict(allowed=allowed, horizons=["6mo"], scenario_ids=["policy"],
+                elicits=[{"key": "estimate", "fields": ["lower", "upper"], "minimum": 0, "maximum": 1}])
+    answer = {"forecasts": cells, "estimate": estimate}
+    _, _, received, expected, problems = ru.check_forecast_submission(answer, **args)
+    assert (received, expected) == (2 * delivered, 20)
+    assert bool(problems) == rejected
+    assert ru.validate_before_explanation(answer, **args) == problems
+
+
 def test_followup_schema_validation_and_record(context):
     snapshot, args = context
     qid = args["question"]["id"]
