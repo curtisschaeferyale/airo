@@ -45,6 +45,21 @@ A **condition** is a rule for what to forecast with, defined by rank on Epoch's 
   (`fri_forecaster.variants`; `none`, AIRO's Baseline, adds nothing). An entry lists them
   in `prompts`, and its forecast is the mean over every member under every prompt.
 
+In each mode with research, a member uses Exa by default. Select Tavily or
+Keenable with `forecastbench run --search tavily|keenable`. `--search all`
+runs a member per backend. `forecastbench build --member MODEL[@THINKING][,MODE][,SEARCH]`
+also defaults to Exa when research is enabled. Use `,tavily` to select existing
+Tavily members. Exa requires `EXA_API_KEY`, Tavily requires `TAVILY_API_KEY`, and
+Keenable accepts `KEENABLE_API_KEY` for rounds that exceed its public request limit.
+
+To prepare the three Chorus submissions, run
+`python -m forecastbench.names configure-chorus-search --dry-run` with the
+installation's private registry, then omit `--dry-run` to save. The command
+uses the current Tavily Chorus as the template, creates Exa and Keenable
+entries, and selects the three Chorus entries for submission. The round script
+runs each backend independently and builds a set for each. It keeps the
+existing Chorus visibility and submits the two new entries anonymously.
+
 **What goes up.** ForecastBench takes at most 3 sets a round and, since 2026-11-13, at
 most one under the team's own name; the rest carry its anonymous one (`Anonymous N`). A
 condition is submitted unless the registry says `"submit": false`, and anonymously unless
@@ -154,6 +169,7 @@ short, the files to upload, and API cost per member.
 <ROUNDS_DIR>/<due>/
   question_set.json                       the round's questions, fetched once
   members/<model>--<thinking>--<mode>/     mode: research, noresearch, airo-<condition>
+                                          (an Exa member adds --exa, a Keenable member --keenable)
     manifest.json                         the member's settings, pinned
     results.jsonl                         one line per question answered
     calls/<source>__<id>/attempt-N/       one pi call's inbox and outbox

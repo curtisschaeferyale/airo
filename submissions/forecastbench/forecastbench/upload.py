@@ -89,10 +89,7 @@ def submissions(root, reg, org, public_org):
                 or provenance['name'] != name or provenance['organization'] != organization):
             raise ValueError(f'{path.name}: build does not match the registered submission')
         expected_members = {
-            Path(fb.member_dir(str(root), model, thinking, mode)).name
-            for model, thinking, mode in (
-                (spec.split('@')[0], spec.split('@')[1].split(',')[0], spec.split(',')[1])
-                for spec in names.member_specs(reg, condition))}
+            Path(fb.member_dir_for_spec(root, spec)).name for spec in names.member_specs(reg, condition)}
         if set(provenance['members']) != expected_members:
             raise ValueError(f'{path.name}: members do not match the registered submission')
         covs = provenance['member_coverage']
