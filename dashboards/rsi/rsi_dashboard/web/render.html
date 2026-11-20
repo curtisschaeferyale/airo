@@ -20,7 +20,7 @@ const runs = Array.from(batches.values(), arms => {
     answers[id] = Object.fromEntries(Object.keys(answer).map(field =>
       [field, median(arms.map(arm => arm.answers[id][field]))]));
   }
-  return {id:first.id, date:first.date, arms, answers};
+  return {id:first.id, date:first.date, method:first.method, arms, answers};
 });
 const latest = runs.at(-1);
 const questions = new Map(sections.flatMap(s => s.questions.map(q => [q.id, q])));
@@ -134,8 +134,9 @@ function drawHistory() {
     element("div",tooltip,cluster[0].date || "Example","label");
     for (const run of cluster) {
       if (cluster.length > 1) element("div",tooltip,run.id,"label");
-      element("strong",tooltip,"Median across ensembles · " + format(run.answers["Q3.2"].probability,"Q3.2"));
+      element("strong",tooltip,(run.method ? "Historical ensemble · " : "Median across ensembles · ") + format(run.answers["Q3.2"].probability,"Q3.2"));
       comparison(tooltip,run,"Q3.2");
+      if (run.method) element("small",tooltip,run.method);
     }
     tooltip.hidden = false;
     positionTooltip();
@@ -214,6 +215,12 @@ function openQuestion(id,opener) {
     element("strong",summary,format(point(answer),id));
     if (interval(answer,id)) element("small",summary,"P10–P90 · " + interval(answer,id));
     comparison(content,latest,id);
+    for (const run of runs.filter(r => r.method && r !== latest)) {
+      const history = element("details",content);
+      element("summary",history,run.date + " · Historical forecasts");
+      element("p",history,run.method);
+      comparison(history,run,id);
+    }
   }]);
   views.push(["Definition", content => {
     for (const [heading,text] of [["Answer format",q.answer],["Resolution",q.resolution],["Section definitions",section.intro]]) {
@@ -234,7 +241,7 @@ function openQuestion(id,opener) {
         for (const arm of latest.arms) {
           const column = element("section",reasons);
           element("h3",column,labels[arm.web_access || "legacy"]);
-          element("p",column,arm.models.find(m => m.id === key)?.rationales[section.id] || "—","survey-text");
+          element("p",column,arm.models.find(m => m.id === key)?.rationales?.[section.id] || "—","survey-text");
         }
       };
     }
@@ -281,19 +288,20 @@ if (latest) {
 }
 byId("download").disabled = !allRuns.length;
 byId("download").onclick = () => {
-  const rows = [["run","date","web_access","model","question","probability","p10","p50","p90","section_rationale"]];
+  const rows = [["run","date","web_access","model","question","probability","p10","p50","p90","section_rationale","method","question_rationales_by_prompt"]];
   for (const run of allRuns) {
     for (const model of [...run.models,{id:"ensemble",answers:run.answers}]) {
       for (const s of sections) for (const q of s.questions) {
         const a = model.answers[q.id];
-        rows.push([run.id,run.date,run.web_access || "legacy",model.id,q.id,a.probability,a.p10,a.p50,a.p90,model.rationales?.[s.id]]);
+        rows.push([run.id,run.date,run.web_access || "legacy",model.id,q.id,a.probability,a.p10,a.p50,a.p90,model.rationales?.[s.id],run.method || "Baseline",
+          model.question_rationales ? JSON.stringify(model.question_rationales[q.id]) : ""]);
       }
     }
   }
-  for (const run of runs) {
+  for (const run of runs.filter(r => !r.method)) {
     for (const section of sections) for (const q of section.questions) {
       const a = run.answers[q.id];
-      rows.push([run.id,run.date,"all-conditions","median-across-ensembles",q.id,a.probability,a.p10,a.p50,a.p90,""]);
+      rows.push([run.id,run.date,"all-conditions","median-across-ensembles",q.id,a.probability,a.p10,a.p50,a.p90,"","Median across condition ensembles",""]);
     }
   }
   const csv = rows.map(row => row.map(v => '"' + String(v ?? "").replaceAll('"','""') + '"').join(",")).join("\r\n");
