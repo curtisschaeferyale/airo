@@ -70,6 +70,37 @@ function comparison(parent, run, id) {
     arm.models.find(m => m.id === key)?.answers[id]));
   row("Ensemble",run.arms.map(arm => arm.answers[id]));
 }
+const detailHint = element("div", document.body, "Click to see forecasts, definitions, and rationales", "detail-hint");
+detailHint.id = "forecast-detail-hint";
+detailHint.setAttribute("role", "tooltip");
+detailHint.hidden = true;
+
+function bindQuestion(row, trigger, id) {
+  trigger.setAttribute("aria-describedby", detailHint.id);
+  function show(x, y, above) {
+    detailHint.hidden = false;
+    detailHint.style.left = Math.max(8, Math.min(x, innerWidth - detailHint.offsetWidth - 8)) + "px";
+    detailHint.style.top = (y + detailHint.offsetHeight + 8 <= innerHeight ? y : Math.max(8, above - detailHint.offsetHeight)) + "px";
+  }
+  row.addEventListener("pointermove", event => {
+    if (event.pointerType !== "touch") show(event.clientX + 12, event.clientY + 18, event.clientY - 8);
+  });
+  row.addEventListener("pointerleave", hideDetailHint);
+  trigger.addEventListener("focus", () => {
+    if (!trigger.matches(":focus-visible")) return;
+    const rect = trigger.getBoundingClientRect();
+    show(rect.left, rect.bottom + 6, rect.top - 6);
+  });
+  trigger.addEventListener("blur", hideDetailHint);
+  forecastDialog.bind(row, trigger, opener => {
+    hideDetailHint();
+    openQuestion(id, opener);
+  });
+}
+function hideDetailHint() { detailHint.hidden = true; }
+document.addEventListener("keydown", event => { if (event.key === "Escape") hideDetailHint(); });
+window.addEventListener("resize", hideDetailHint);
+
 byId("example").hidden = !synthetic;
 byId("updated").textContent = latest?.date ? "Updated: " + latest.date :
   synthetic ? "Example values" : "Awaiting the first Baseline run";
@@ -87,7 +118,7 @@ for (const [title, first, second] of [
     element("span", row, format(point(v), id), "number");
     if (id) {
       row.setAttribute("aria-label", year + " · " + format(point(v), id) + " · Open " + id + " · " + questions.get(id).label);
-      forecastDialog.bind(row, row, trigger => openQuestion(id, trigger));
+      bindQuestion(row, row, id);
     }
     element("small", row, interval(v, id));
   }
@@ -273,7 +304,7 @@ for (const section of sections) {
     element("td",row,q.id);
     const trigger = element("button",element("td",row),undefined,"question-trigger");
     trigger.append(surveyText(q.prompt));
-    forecastDialog.bind(row, trigger, opener => openQuestion(q.id, opener));
+    bindQuestion(row, trigger, q.id);
     const answer = latest?.answers[q.id];
     const text = format(point(answer),q.id) + (interval(answer,q.id) ? " (" + interval(answer,q.id) + ")" : "");
     element("td",row,text);
