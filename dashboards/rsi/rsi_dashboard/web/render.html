@@ -32,6 +32,14 @@ function element(tag, parent, text, className) {
   parent.append(node);
   return node;
 }
+function surveyText(text) {
+  const fragment = document.createDocumentFragment();
+  for (const [i, part] of text.split(/\*([^*\n]+)\*/g).entries()) {
+    if (i % 2) element("em", fragment, part);
+    else fragment.append(part);
+  }
+  return fragment;
+}
 function point(value) { return value?.probability ?? value?.p50; }
 function unit(id) {
   const answer = questions.get(id).answer;
@@ -68,7 +76,7 @@ byId("updated").textContent = latest?.date ? "Updated: " + latest.date :
 for (const [title, first, second] of [
   ["Public fast year", "Q3.1", "Q3.2"], ["AL5 share of AI R&D", "Q1.1", "Q1.2"],
   ["Internal lead over public models (ECI points)", "Q4.1", "Q4.2"],
-  ["If a public fast year: caused by AI R&D automation", null, "Q3.4"]
+  ["If a public fast year: caused by AI R&D automation", questions.has("Q3.5") ? "Q3.5" : null, "Q3.4"]
 ]) {
   const card = element("article", byId("cards"), undefined, "card");
   element("div", card, title, "label");
@@ -208,14 +216,14 @@ function openQuestion(id,opener) {
   const section = sections.find(s => s.questions.includes(q));
   const views = [];
   views.push(["Forecasts", content => {
-    if (!latest) { element("p",content,"Awaiting the first Baseline run."); return; }
+    if (!latest?.answers[id]) { element("p",content,"Awaiting the first forecast for this question."); return; }
     const answer = latest.answers[id];
     const summary = element("div",content,undefined,"question-median");
     element("span",summary,"Median across ensembles","label");
     element("strong",summary,format(point(answer),id));
     if (interval(answer,id)) element("small",summary,"P10–P90 · " + interval(answer,id));
     comparison(content,latest,id);
-    for (const run of runs.filter(r => r.method && r !== latest)) {
+    for (const run of runs.filter(r => r.method && r !== latest && r.answers[id])) {
       const history = element("details",content);
       element("summary",history,run.date + " · Historical forecasts");
       element("p",history,run.method);
@@ -225,10 +233,10 @@ function openQuestion(id,opener) {
   views.push(["Definition", content => {
     for (const [heading,text] of [["Answer format",q.answer],["Resolution",q.resolution],["Section definitions",section.intro]]) {
       element("h3",content,heading);
-      element("p",content,text,"survey-text");
+      element("p",content,undefined,"survey-text").append(surveyText(text));
     }
   }]);
-  if (latest) views.push(["Rationales", content => {
+  if (latest?.answers[id]) views.push(["Rationales", content => {
     element("p",content,"Model rationales for this survey section.","rationale-intro");
     const choices = element("div",content,undefined,"model-choices");
     const reasons = element("div",content,undefined,"rationale-columns");
@@ -247,7 +255,7 @@ function openQuestion(id,opener) {
     }
     choices.firstElementChild?.click();
   }]);
-  forecastDialog.show(opener, id + " · " + section.title, q.prompt, views);
+  forecastDialog.show(opener, id + " · " + section.title, surveyText(q.prompt), views);
 }
 const weekAgo = latest?.date && runs.findLast(r => Date.parse(latest.date)-Date.parse(r.date) === 7*86400000);
 for (const section of sections) {
@@ -263,14 +271,15 @@ for (const section of sections) {
   for (const q of section.questions) {
     const row = element("tr",body);
     element("td",row,q.id);
-    const trigger = element("button",element("td",row),q.prompt,"question-trigger");
+    const trigger = element("button",element("td",row),undefined,"question-trigger");
+    trigger.append(surveyText(q.prompt));
     forecastDialog.bind(row, trigger, opener => openQuestion(q.id, opener));
     const answer = latest?.answers[q.id];
     const text = format(point(answer),q.id) + (interval(answer,q.id) ? " (" + interval(answer,q.id) + ")" : "");
     element("td",row,text);
-    const values = latest?.arms.flatMap(arm => arm.models.map(m => point(m.answers[q.id])));
+    const values = answer && latest.arms.flatMap(arm => arm.models.map(m => point(m.answers[q.id])));
     element("td",row,values ? format(Math.min(...values),q.id)+"–"+format(Math.max(...values),q.id) : "—");
-    const delta = weekAgo ? point(answer)-point(weekAgo.answers[q.id]) : null;
+    const delta = answer && weekAgo?.answers[q.id] ? point(answer)-point(weekAgo.answers[q.id]) : null;
     element("td",row,delta == null ? "—" : (delta>0?"+":"")+Number(delta.toFixed(2))+(unit(q.id)?" pp":""));
   }
 
@@ -293,6 +302,7 @@ byId("download").onclick = () => {
     for (const model of [...run.models,{id:"ensemble",answers:run.answers}]) {
       for (const s of sections) for (const q of s.questions) {
         const a = model.answers[q.id];
+        if (!a) continue;
         rows.push([run.id,run.date,run.web_access || "legacy",model.id,q.id,a.probability,a.p10,a.p50,a.p90,model.rationales?.[s.id],run.method || "Baseline",
           model.question_rationales ? JSON.stringify(model.question_rationales[q.id]) : ""]);
       }
@@ -301,6 +311,7 @@ byId("download").onclick = () => {
   for (const run of runs.filter(r => !r.method)) {
     for (const section of sections) for (const q of section.questions) {
       const a = run.answers[q.id];
+      if (!a) continue;
       rows.push([run.id,run.date,"all-conditions","median-across-ensembles",q.id,a.probability,a.p10,a.p50,a.p90,"","Median across condition ensembles",""]);
     }
   }
