@@ -47,7 +47,8 @@ def test_baseline_run_recovers_only_missing_member(tmp_path, monkeypatch):
     run.main()
     assert sorted(calls) == ["fake/first", "fake/second", "fake/second"]
     ensemble = json.loads((out / "ensemble.json").read_text())
-    assert len(ensemble["answers"]) == 18
+    assert len(ensemble["answers"]) == 19
+    assert ensemble["answers"]["Q3.5"] == {"probability": 50}
     assert ensemble["answers"]["Q5.1"]["probability"] == 60
 
     # The dashboard consumes the completed runner output and verifies its median
@@ -97,3 +98,27 @@ def test_paired_conditions_freeze_one_panel_and_never_pool_answers(tmp_path, mon
     (pair / "fri-blocked" / "ensemble.json").unlink()
     with pytest.raises(ValueError, match="incomplete run"):
         load_runs(tmp_path, source, parse(source), publication=True)
+
+
+def test_original_run_publishes_alongside_new_instrument(tmp_path):
+    import hashlib
+    import re
+    from rsi_dashboard.results import load_run
+
+    source = run.SOURCE.read_text()
+    original = re.sub(r"### Q3\.5 .*?(?=## 4\.)", "", source, flags=re.S).replace(
+        "19 forecasting questions", "18 forecasting questions")
+    response = synthetic(parse(original))
+    digest = hashlib.sha256(original.encode()).hexdigest()
+    meta = {"condition": "baseline", "date": "2026-11-20", "prompt_sha256": digest}
+    plan = dict(meta, survey=original, prompt=original, members=[{"model": "test", "key": "one"}])
+    run.save(tmp_path / "plan.json", plan)
+    run.save(tmp_path / "one.json", dict(model="test", prompt_sha256=digest, response=response))
+    run.save(tmp_path / "ensemble.json", dict(meta, models=["test"], answers=response["answers"]))
+
+    published = load_run(tmp_path, source, parse(source))
+    assert published["answers"] == response["answers"]
+    assert "Q3.5" not in published["answers"]
+    run.save(tmp_path / "plan.json", dict(plan, survey=original + "unrecognized revision"))
+    with pytest.raises(ValueError, match="unrecognized frozen survey"):
+        load_run(tmp_path, source, parse(source))

@@ -5,7 +5,7 @@ from datetime import date
 from statistics import median
 
 from .conditions import DOMAINS
-from .instrument import fields, validate
+from .instrument import fields, original_survey, parse, validate
 
 
 def read(path):
@@ -16,8 +16,12 @@ def load_run(folder, source, sections):
     plan = read(folder / "plan.json")
     ensemble = read(folder / "ensemble.json")
     digest = hashlib.sha256(plan["prompt"].encode()).hexdigest()
+    if plan["survey"] != source:
+        if not original_survey(plan["survey"]):
+            raise ValueError(f"{folder}: unrecognized frozen survey")
+        sections = parse(plan["survey"])
     if (plan["condition"] != "baseline" or ensemble["condition"] != "baseline"
-            or plan["survey"] != source or digest != plan["prompt_sha256"]
+            or digest != plan["prompt_sha256"]
             or digest != ensemble["prompt_sha256"] or plan["date"] != ensemble["date"]):
         raise ValueError(f"{folder}: instrument or run metadata mismatch")
     access = plan.get("web_access")
@@ -68,6 +72,8 @@ def load_october_delivery(path, sections):
         model_answers, reasons = {}, {}
         for section in sections:
             for q in section["questions"]:
+                if q["id"] == "Q3.5":  # Introduced after the October delivery.
+                    continue
                 key = q["id"].lower().replace(".", "_")
                 model_answers[q["id"]] = {f: forecasts[key][f] for f in fields(q)}
                 reasons[q["id"]] = forecasts[key]["rationales"]
