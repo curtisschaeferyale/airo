@@ -52,6 +52,7 @@ dataset questions one per resolution date. Each attempt gets a fresh
 folder (harness.new_attempt_dir), so a retry never reads an older answer;
 a call that ended in a provider error is retried three times by harness.run.
 """
+import statistics
 import argparse
 import hashlib
 import json
@@ -285,8 +286,8 @@ def coverage(qset, results):
     return out
 
 
-def combine(qset, members):
-    """{member: results} -> {(source, id): result} with each cell the MEAN of
+def combine(qset, members, aggregate="mean"):
+    """{member: results} -> {(source, id): result} with each cell the registered aggregate of
     the members that answered it; `n_members` per cell is kept."""
     out = {}
     for q in questions_of(qset):
@@ -298,7 +299,7 @@ def combine(qset, members):
         for d in dates_of(q):
             vals = [r["probabilities"][d] for r in rs if d in r["probabilities"]]
             if vals:
-                probs[d] = sum(vals) / len(vals)
+                probs[d] = statistics.median(vals) if aggregate == "median" else sum(vals) / len(vals)
                 n[d] = len(vals)
         out[k] = {"id": q["id"], "source": q["source"], "wanted": dates_of(q), "probabilities": probs,
                   "n_members": n, "rationale": rs[0].get("rationale") if len(rs) == 1 else None}
@@ -452,13 +453,13 @@ def cmd_build(args):
         if not os.path.exists(os.path.join(mdir, "manifest.json")):
             sys.exit(f"no member run at {mdir}")
         members[os.path.basename(mdir)] = read_results(os.path.join(mdir, "results.jsonl"))
-    results = combine(qset, members)
+    results = combine(qset, members, args.aggregate)
     model_org = args.model_org or args.org
     fs = build_forecast_set(qset, results, args.org, args.name, model_org, args.reasoning)
     path = os.path.join(root, f"{qset['forecast_due_date']}.{file_org(args.org)}.{args.set_number}.json")
     json.dump(fs, open(path, "w"), indent=1)
     member_cov = {m: coverage(qset, r) for m, r in members.items()}
-    json.dump({"members": list(members), "aggregate": "mean", "name": args.name, "organization": args.org,
+    json.dump({"members": list(members), "aggregate": args.aggregate, "name": args.name, "organization": args.org,
                "member_coverage": member_cov,
                "submission_sha256": hashlib.sha256(open(path, "rb").read()).hexdigest(),
                "question_set_sha256": hashlib.sha256(open(os.path.join(root, "question_set.json"), "rb").read()).hexdigest()},
@@ -513,8 +514,9 @@ def main(argv=None):
     r.add_argument("--sample", type=int, default=None, help="N questions, half market and half dataset (practice run)")
     r.add_argument("--timeout", type=int, default=900, help="seconds per pi call")
     r.add_argument("--pi", default=harness.DEFAULT_PI)
-    b = sub.add_parser("build", help="combine members into a forecast set (mean per cell)")
+    b = sub.add_parser("build", help="combine members into a forecast set")
     b.add_argument("--root", required=True)
+    b.add_argument("--aggregate", choices=("mean", "median"), default="mean")
     b.add_argument("--member", action="append", required=True,
                    help="MODEL[@THINKING][,MODE][,exa|tavily|keenable]; MODE is research, noresearch or airo-<condition>; "
                         "defaults to exa with research; repeat for an ensemble")
