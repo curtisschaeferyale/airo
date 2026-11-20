@@ -52,13 +52,13 @@ also defaults to Exa when research is enabled. Use `,tavily` to select existing
 Tavily members. Exa requires `EXA_API_KEY`, Tavily requires `TAVILY_API_KEY`, and
 Keenable accepts `KEENABLE_API_KEY` for rounds that exceed its public request limit.
 
-To prepare the three Chorus submissions, run
-`python -m forecastbench.names configure-chorus-search --dry-run` with the
-installation's private registry, then omit `--dry-run` to save. The command
-uses the current Tavily Chorus as the template, creates Exa and Keenable
-entries, and selects the three Chorus entries for submission. The round script
-runs each backend independently and builds a set for each. It keeps the
-existing Chorus visibility and submits the two new entries anonymously.
+Set `FB_CHORUS_PUBLIC_SEARCH` privately to the backend selected for the public
+slot. Preview the three entries with `python -m forecastbench.names
+configure-chorus-search --dry-run` and omit `--dry-run` to save. Each entry
+uses the shared Baseline prompt and takes the median across responding models
+for each question and date. Each new registration takes an unused suffix from
+the private registry under the same Chorus prefix. The round keeps individual
+member results and writes the aggregation rule to the local build provenance.
 
 **What goes up.** ForecastBench takes at most 3 sets a round and, since 2026-11-13, at
 most one under the team's own name; the rest carry its anonymous one (`Anonymous N`). A

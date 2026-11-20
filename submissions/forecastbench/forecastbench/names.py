@@ -54,6 +54,7 @@ import inspect
 import json
 import os
 import sys
+import tempfile
 from datetime import date
 
 from fri_forecaster import baseline
@@ -79,10 +80,15 @@ def load(path=None):
 
 def save(reg, path=None):
     path = path or registry_path()
-    with open(path + ".tmp", "w") as f:
-        json.dump(reg, f, indent=1)
-        f.write("\n")
-    os.replace(path + ".tmp", path)
+    with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(os.path.abspath(path)), delete=False) as f:
+        try:
+            json.dump(reg, f, indent=1)
+            f.write("\n")
+            f.close()
+            os.replace(f.name, path)
+        finally:
+            if os.path.exists(f.name):
+                os.unlink(f.name)
 
 
 def code_of(research, prompts=None):
@@ -110,9 +116,16 @@ def fingerprint(entry):
 
 
 def next_place(reg, condition):
-    used = {n.removeprefix(condition + "-") for n, entry in reg["names"].items()
-            if entry.get("condition") == condition}
-    return next((p for p in reg["places"] if p not in used), None)
+    prefix = reg["conditions"].get(condition, {}).get("name_prefix", condition)
+    return next((p for p in reg["places"] if f"{prefix}-{p}" not in reg["names"]), None)
+
+
+def next_name(reg, condition):
+    place = next_place(reg, condition)
+    if place is None:
+        sys.exit(f"{condition}: every place in the registry is used; add places")
+    prefix = reg["conditions"][condition].get("name_prefix", condition)
+    return f"{prefix}-{place}"
 
 
 def drift(entry):
@@ -133,7 +146,7 @@ def current(reg, condition):
     problems = drift(reg["names"][name])
     if problems:
         sys.exit(f"{name}: the configuration changed ({'; '.join(problems)}). "
-                 f"Register it as {condition}-{next_place(reg, condition)} in the registry.")
+                 f"Register it as {next_name(reg, condition)} in the registry.")
     return name
 
 
@@ -255,10 +268,7 @@ def sync(reg, condition, panel, today=None, *, baseline_only=False):
                        f"to register; {name} keeps {', '.join(have)}")
     if not changes:
         return name, warning or f"{name}: the top {n} ({', '.join(have)}), code unchanged"
-    place = next_place(reg, condition)
-    if place is None:
-        sys.exit(f"{condition}: every place in the registry is used; add places")
-    new_name = f"{condition}-{place}"
+    new_name = next_name(reg, condition)
     new = {"condition": condition, "reason": f"sync {today or date.today().isoformat()}: {'; '.join(changes)}",
            "aggregate": entry["aggregate"], "research": entry["research"],
            **({"prompts": list(entry["prompts"])} if entry.get("prompts") else {}),
@@ -270,7 +280,7 @@ def sync(reg, condition, panel, today=None, *, baseline_only=False):
     return new_name, f"{new_name}: registered, after {name} ({'; '.join(changes)})" + (f"; {warning}" if warning else "")
 
 
-def configure_chorus_search(reg, source):
+def configure_chorus_search(reg, source, public_search):
     """Use the existing Tavily Chorus configuration for a three-backend comparison."""
     if source not in reg["conditions"]:
         sys.exit(f"no Chorus condition {source!r} in the registry")
@@ -279,27 +289,27 @@ def configure_chorus_search(reg, source):
     if not entry["research"] or any((m["options"].get("search_backend") or "tavily") != "tavily"
                                     for m in entry["members"]):
         sys.exit(f"{source!r} must be a Tavily condition with research")
-    comparison = [source]
-    for search in ("exa", "keenable"):
-        condition = f"{source}-{search}"
+    if public_search not in BACKENDS:
+        sys.exit("choose the public search backend in the private configuration")
+    comparison = []
+    for search in ("tavily", "exa", "keenable"):
+        condition = source if search == "tavily" else f"{source}-{search}"
         comparison.append(condition)
         new = copy.deepcopy(entry)
-        new.update(condition=condition, reason=f"Chorus search comparison using {search}")
+        new.update(condition=condition, aggregate="median", prompts=["none"], reason=f"Chorus search comparison using {search}")
+        new["harness"]["prompt_version"] = prompt_version(new)
         for member in new["members"]:
-            member["options"]["search_backend"] = search
             member["one_shot_baseline"] = None
+            member["options"].update(search_backend=search, thinking=fb.thinking_of(member["pi_model"], "airo-none"),
+                                     min_research=0, tools=["web_search", "read_page", "submit_forecast"])
         new["fingerprint"] = fingerprint(new)
-        settings = reg["conditions"].get(condition, {})
+        settings = reg["conditions"].setdefault(condition, {})
+        settings.update(name_prefix=source, submit=True, public=(search == public_search))
         current_entry = reg["names"].get(settings.get("current"), {})
-        if new["fingerprint"] != current_entry.get("fingerprint"):
-            place = next_place(reg, condition)
-            if place is None:
-                sys.exit(f"{condition}: every place in the registry is used; add places")
-            name = f"{condition}-{place}"
+        if new["fingerprint"] != current_entry.get("fingerprint") or not settings["current"].startswith(source + "-"):
+            name = next_name(reg, condition)
             reg["names"][name] = new
-            settings = dict(settings, current=name, description=f"{original['description']} using {search}")
-        reg["conditions"][condition] = dict(settings, submit=True, public=False)
-    original["submit"] = True
+            settings.update(current=name, description="Baseline panel median with " + search)
     for condition, settings in reg["conditions"].items():
         if condition not in comparison:
             settings["submit"] = False
@@ -317,12 +327,14 @@ def main(argv=None, stdin=None):
         print("\n".join(public_of(reg)))
     elif cmd == "current" and arg:
         print(current(reg, arg))
+    elif cmd == "aggregate" and arg:
+        print(reg["names"][current(reg, arg)]["aggregate"])
     elif cmd == "members" and arg:
         print("\n".join(member_specs(reg, arg)))
     elif cmd == "fingerprint" and arg:
         print(fingerprint(reg["names"][reg["conditions"][arg]["current"]]))
     elif cmd == "configure-chorus-search":
-        conditions = configure_chorus_search(reg, arg or "chorus")
+        conditions = configure_chorus_search(reg, arg or "chorus", os.environ.get("FB_CHORUS_PUBLIC_SEARCH"))
         if "--dry-run" not in argv:
             save(reg)
         for condition in conditions:

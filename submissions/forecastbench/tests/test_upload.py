@@ -107,6 +107,16 @@ class UploadTest(unittest.TestCase):
         self.assertEqual(result, json.loads((self.root / 'upload-receipt.json').read_text()))
         self.assertEqual(result['objects'][0]['name'], f'team/binary/{DUE}/{self.path.name}')
 
+    def test_median_registration_requires_median_build(self):
+        entry = self.reg['names']['solo-oak']
+        entry['aggregate'] = 'median'
+        entry['fingerprint'] = names.fingerprint(entry)
+        with self.assertRaisesRegex(ValueError, 'aggregation does not match'):
+            self.run_upload()
+        self.build_args.extend(['--aggregate', 'median'])
+        self.assertEqual(self.build(), 0)
+        self.assertEqual(self.run_upload()['status'], 'uploaded')
+
     def test_upload_checks_registered_search_backend(self):
         entry = self.reg['names']['solo-oak']
         for search in ('exa', 'keenable'):

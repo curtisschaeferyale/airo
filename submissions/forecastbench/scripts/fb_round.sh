@@ -79,6 +79,8 @@ else
     || { log "FATAL: could not refresh the Epoch index"; exit 3; }
 fi
 [[ -n "$PANEL" ]] || { log "FATAL: panel selection returned no members"; exit 3; }
+log "ECI panel in rank order for this invocation:"
+while IFS= read -r row; do log "$row"; done <<< "$PANEL"
 SYNC_NOTE="$("$PY" -m forecastbench.names sync --baseline-ensemble <<< "$PANEL")" || { log "names sync failed: $SYNC_NOTE"; exit 3; }
 while read -r line; do log "$line"; done <<< "$SYNC_NOTE"
 for c in "${ALL[@]}"; do "$PY" -m forecastbench.names current "$c" >/dev/null || exit 3; done
@@ -116,7 +118,9 @@ build() {  # pass, set number, condition: organization and model_organization ar
   name="$("$PY" -m forecastbench.names current "$c")"
   org="$FB_ORG"; [[ "$c" == "$PUBLIC" ]] && org="$FB_PUBLIC_ORG"
   local args=(); for m in $("$PY" -m forecastbench.names members "$c"); do args+=(--member "$m"); done
-  "$PY" -m forecastbench build --root "$ROOT" --set-number "$n" --name "$name" \
+  local aggregate
+  aggregate="$("$PY" -m forecastbench.names aggregate "$c")" || return 3
+  "$PY" -m forecastbench build --aggregate "$aggregate" --root "$ROOT" --set-number "$n" --name "$name" \
       --org "$org" "${args[@]}" > "$ROOT/logs/build-$n.log" 2>&1
   rc=$?
   if [[ $pass == 2 && $rc != 0 ]]; then build_failed=1; fi

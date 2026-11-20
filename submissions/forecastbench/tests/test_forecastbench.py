@@ -81,6 +81,13 @@ class ForecastBenchTest(unittest.TestCase):
         self.assertEqual([q["id"] for q in got], ["m0", "m3", "m6", "d0", "d3", "d6"])
         self.assertEqual(len(fb.sample_of(qs[:2] + qs[10:], 6)), 6)  # few markets: dataset fills in
 
+    def test_panel_median_per_answered_cell(self):
+        key = ("metaculus", "m1")
+        members = {i: {key: {"probabilities": {"final": p}}} for i, p in enumerate((0.1, 0.2, 0.4, 0.99))}
+        self.assertAlmostEqual(fb.combine(QSET, members, "median")[key]["probabilities"]["final"], 0.3)
+        members[3][key]["probabilities"].clear()
+        self.assertEqual(fb.combine(QSET, members, "median")[key]["probabilities"]["final"], 0.2)
+
     def test_prompt(self):
         m, ds = fb.questions_of(QSET)
         pm = fb.build_prompt(m, "2026-10-11")
@@ -294,14 +301,20 @@ class NamesTest(unittest.TestCase):
         self.assertTrue(all(s.endswith(",noresearch") for s in self.names.member_specs(self.reg, "unaided")))
 
     def test_chorus_search_entries_pin_one_backend_each(self):
-        conditions = self.names.configure_chorus_search(self.reg, "pooled")
+        conditions = self.names.configure_chorus_search(self.reg, "pooled", "exa")
         self.assertEqual(conditions, ["pooled", "pooled-exa", "pooled-keenable"])
         self.assertEqual(self.names.submitted(self.reg), conditions)
+        self.assertEqual(self.names.public_of(self.reg), ["pooled-exa"])
+        for c in conditions:
+            name = self.names.current(self.reg, c)
+            self.assertIn(name, ["pooled-" + place for place in self.reg["places"]])
+            self.assertEqual(self.reg["names"][name]["aggregate"], "median")
+            self.assertEqual(self.reg["names"][name]["prompts"], ["none"])
         tavily, exa, keenable = [self.names.member_specs(self.reg, c) for c in conditions]
         self.assertEqual(exa, [s.removesuffix("tavily") + "exa" for s in tavily])
         self.assertEqual(keenable, [s.removesuffix("tavily") + "keenable" for s in tavily])
         original = json.dumps(self.reg)
-        self.names.configure_chorus_search(self.reg, "pooled")
+        self.names.configure_chorus_search(self.reg, "pooled", "exa")
         self.assertEqual(json.dumps(self.reg), original)
 
     def test_places_unique(self):

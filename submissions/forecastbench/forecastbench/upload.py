@@ -92,6 +92,8 @@ def submissions(root, reg, org, public_org):
             Path(fb.member_dir_for_spec(root, spec)).name for spec in names.member_specs(reg, condition)}
         if set(provenance['members']) != expected_members:
             raise ValueError(f'{path.name}: members do not match the registered submission')
+        if provenance.get('aggregate') != reg['names'][name]['aggregate']:
+            raise ValueError(f'{path.name}: aggregation does not match the registered submission')
         covs = provenance['member_coverage']
         if set(covs) != expected_members or any(
                 set(cov) != {'market', 'dataset'} or fb.short_kinds(cov) for cov in covs.values()):
