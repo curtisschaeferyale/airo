@@ -41,7 +41,7 @@ import tomllib
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .config import REPO_ROOT
+from .config import REPO_ROOT, POST_FORECAST_RATIONALE
 from .registry import DEFAULT_MODEL_SET
 
 EXPERIMENTS_DIR = REPO_ROOT / "experiments"
@@ -77,6 +77,7 @@ DEFAULTS = {
     "prior_baseline": False,         # optional prior Baseline ensemble file
     "news_cache": False,             # frozen weekly news input + AI-forecast ban (unpublished shadow)
     "max_turns": None,               # None: instrument default; 0: no forced-turn submission
+    "rationale_mode": "inline",      # opt-in post-submission catastrophe explanations
 
     "publish": False,                 # rows go to the scenario set's own logs, which the page reads
     "cadence": "manual",              # when the cron runs it: weekdays (UTC), or "manual"
@@ -139,6 +140,8 @@ def condition_sha256(settings):
         del keep["news_cache"]
     if keep["max_turns"] is None:
         del keep["max_turns"]
+    if keep["rationale_mode"] == "inline":
+        del keep["rationale_mode"]
     return hashlib.sha256(json.dumps(keep, sort_keys=True).encode()).hexdigest()
 
 
@@ -191,6 +194,12 @@ def _settings(table, where):
 
 
 def _check(s, pooled, where):
+    if s["rationale_mode"] not in ("inline", POST_FORECAST_RATIONALE):
+        raise ValueError(f"{where}: unknown rationale_mode")
+    if s["rationale_mode"] == POST_FORECAST_RATIONALE and not (
+            pooled and s["publish"] and s["instrument"] == "minimal"
+            and s["scenarios"] == "data/combined_conditions.json"):
+        raise ValueError(f"{where}: post-forecast rationales require the published pooled combined instrument")
     if s["max_turns"] is not None and (type(s["max_turns"]) is not int or s["max_turns"] < 0
                                       or s["harness"] != "pi"):
         raise ValueError(f"{where}: max_turns must be a nonnegative integer for pi")
