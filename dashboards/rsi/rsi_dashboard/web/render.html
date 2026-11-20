@@ -34,11 +34,31 @@ function element(tag, parent, text, className) {
 }
 function surveyText(text) {
   const fragment = document.createDocumentFragment();
-  for (const [i, part] of text.split(/\*([^*\n]+)\*/g).entries()) {
-    if (i % 2) element("em", fragment, part);
-    else fragment.append(part);
+  // The survey uses inline citations and emphasis, plus paragraph and list blocks.
+  const tokens = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*/g;
+  let end = 0;
+  for (const match of text.matchAll(tokens)) {
+    fragment.append(text.slice(end, match.index));
+    const [, label, url, strong, emphasis] = match;
+    if (url) element("a", fragment, label).href = url;
+    else if (strong) element("strong", fragment, strong);
+    else element("em", fragment, emphasis);
+    end = match.index + match[0].length;
   }
+  fragment.append(text.slice(end));
   return fragment;
+}
+function renderDefinition(parent, text) {
+  for (const block of text.trim().split(/\n\s*\n/)) {
+    if (block.startsWith("- ")) {
+      const list = element("ul", parent);
+      for (const item of block.slice(2).split(/\n- /)) {
+        element("li", list).append(surveyText(item));
+      }
+    } else {
+      element("p", parent).append(surveyText(block));
+    }
+  }
 }
 function point(value) { return value?.probability ?? value?.p50; }
 function unit(id) {
@@ -264,7 +284,7 @@ function openQuestion(id,opener) {
   views.push(["Definition", content => {
     for (const [heading,text] of [["Answer format",q.answer],["Resolution",q.resolution],["Section definitions",section.intro]]) {
       element("h3",content,heading);
-      element("p",content,undefined,"survey-text").append(surveyText(text));
+      renderDefinition(content, text);
     }
   }]);
   if (latest?.answers[id]) views.push(["Rationales", content => {
