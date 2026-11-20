@@ -426,25 +426,29 @@ def short_kinds(cov):
     return [k for k, (done, n) in cov.items() if n and done / n < 0.95]
 
 
+def member_dir_for_spec(root, spec, default_mode="airo-none", default_thinking=None):
+    head, *flags = spec.split(",")
+    searches = [f for f in flags if f in BACKENDS]
+    if len(searches) > 1:
+        sys.exit(f"--member {spec!r}: specify only one search backend")
+    flags = [f for f in flags if f not in BACKENDS]
+    model, _, thinking = head.partition("@")
+    mode = default_mode
+    for part in flags:
+        if part not in MODES:
+            sys.exit(f"--member {spec!r}: unknown mode {part!r} (have {', '.join(MODES)})")
+        mode = part
+    search = searches[0] if searches else ("tavily" if mode == "noresearch" else DEFAULT_SEARCH)
+    thinking = thinking_of(model, mode, thinking or default_thinking)
+    return member_dir(root, model, thinking, mode, search)
+
+
 def cmd_build(args):
     root = os.path.abspath(args.root)
     qset = json.load(open(os.path.join(root, "question_set.json")))
     members = {}
     for spec in args.member:
-        head, *flags = spec.split(",")
-        searches = [f for f in flags if f in BACKENDS]
-        if len(searches) > 1:
-            sys.exit(f"--member {spec!r}: specify only one search backend")
-        flags = [f for f in flags if f not in BACKENDS]
-        model, _, thinking = head.partition("@")
-        mode = args.mode
-        for part in flags:
-            if part not in MODES:
-                sys.exit(f"--member {spec!r}: unknown mode {part!r} (have {', '.join(MODES)})")
-            mode = part
-        search = searches[0] if searches else ("tavily" if mode == "noresearch" else DEFAULT_SEARCH)
-        thinking = thinking_of(model, mode, thinking or args.thinking)
-        mdir = member_dir(root, model, thinking, mode, search)
+        mdir = member_dir_for_spec(root, spec, args.mode, args.thinking)
         if not os.path.exists(os.path.join(mdir, "manifest.json")):
             sys.exit(f"no member run at {mdir}")
         members[os.path.basename(mdir)] = read_results(os.path.join(mdir, "results.jsonl"))

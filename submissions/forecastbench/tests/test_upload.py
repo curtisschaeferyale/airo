@@ -107,6 +107,23 @@ class UploadTest(unittest.TestCase):
         self.assertEqual(result, json.loads((self.root / 'upload-receipt.json').read_text()))
         self.assertEqual(result['objects'][0]['name'], f'team/binary/{DUE}/{self.path.name}')
 
+    def test_upload_checks_registered_search_backend(self):
+        entry = self.reg['names']['solo-oak']
+        for search in ('exa', 'keenable'):
+            with self.subTest(search=search):
+                entry['members'][0]['options']['search_backend'] = search
+                entry['fingerprint'] = names.fingerprint(entry)
+                with self.assertRaisesRegex(ValueError, 'members do not match'):
+                    upload.submissions(self.root, self.reg, 'Example Team', None)
+                spec, = names.member_specs(self.reg, 'solo')
+                dest = Path(fb.member_dir_for_spec(self.root, spec))
+                self.member_path.rename(dest)
+                self.member_path = dest
+                self.build_args[self.build_args.index('--member') + 1] = spec
+                self.assertEqual(self.build(), 0)
+                _, files = upload.submissions(self.root, self.reg, 'Example Team', None)
+                self.assertEqual(len(files), 1)
+
     def test_retry_recovers_from_lost_response_without_overwriting(self):
         self.storage.fail_after_write = True
         with self.assertRaises(TimeoutError):
