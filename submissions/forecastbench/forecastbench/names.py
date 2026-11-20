@@ -39,6 +39,7 @@ examples/names.example.json shows its shape.
     python -m forecastbench.names current <cond>      # its current name, or exit 1 if the code drifted
     python -m forecastbench.names members <cond>      # --member specs for `forecastbench build`
     python -m forecastbench.names sync [--dry-run] < panel   # register what the panel changed
+    python -m forecastbench.names configure-chorus-search [--dry-run]
     python -m forecastbench.names show
     python -m forecastbench.names fingerprint <cond>  # for registering a name by hand
 
@@ -59,6 +60,7 @@ from fri_forecaster import baseline
 import forecastbench as fb
 from fri_forecaster import harness, panel
 from fri_forecaster.variants import VARIANTS
+from fri_forecaster.tool_cli import BACKENDS
 
 MAX_SETS = 3     # ForecastBench: at most 3 sets per round,
 MAX_PUBLIC = 1   # at most one of them under the team's name (2026-11-13)
@@ -108,7 +110,8 @@ def fingerprint(entry):
 
 
 def next_place(reg, condition):
-    used = {n.split("-", 1)[1] for n in reg["names"] if n.startswith(condition + "-")}
+    used = {n.removeprefix(condition + "-") for n, entry in reg["names"].items()
+            if entry.get("condition") == condition}
     return next((p for p in reg["places"] if p not in used), None)
 
 
@@ -135,11 +138,22 @@ def current(reg, condition):
 
 
 def member_specs(reg, condition):
-    """`forecastbench build --member` specs, MODEL@THINKING,MODE: one per member
+    """`forecastbench build --member` specs, MODEL@THINKING,MODE[,SEARCH]: one per member
     under the ForecastBench prompt, one per member and prompt under AIRO's."""
     entry = reg["names"][current(reg, condition)]
     modes = [f"airo-{p}" for p in entry.get("prompts") or []] or ["research" if entry["research"] else "noresearch"]
-    return [f"{m['pi_model']}@{m['options']['thinking']},{mode}" for mode in modes for m in entry["members"]]
+    specs = []
+    for mode in modes:
+        for member in entry["members"]:
+            options = member["options"]
+            spec = f"{member['pi_model']}@{options['thinking']},{mode}"
+            if mode != "noresearch":
+                search = options.get("search_backend") or "tavily"
+                if search not in BACKENDS:
+                    sys.exit(f"{spec}: unknown search backend {search!r}")
+                spec += f",{search}"
+            specs.append(spec)
+    return specs
 
 
 def submitted(reg):
@@ -170,7 +184,7 @@ def parse_panel(lines):
     return panel
 
 
-def known_members(reg, research, airo=False):
+def known_members(reg, research, airo=False, search="tavily"):
     """pi model id -> the member record an earlier name with the same research
     setting and the same prompt (ForecastBench's or AIRO's) gave that model (a
     one-shot baseline is a baseline for one setting), preferring a record that
@@ -180,6 +194,8 @@ def known_members(reg, research, airo=False):
         if e["research"] != research or bool(e.get("prompts")) != airo:
             continue
         for m in e["members"]:
+            if research and (m["options"].get("search_backend") or "tavily") != search:
+                continue
             if m["pi_model"] not in known or (m.get("one_shot_baseline") and not known[m["pi_model"]].get("one_shot_baseline")):
                 known[m["pi_model"]] = m
     return known
@@ -230,7 +246,10 @@ def sync(reg, condition, panel, today=None, *, baseline_only=False):
         if len(top) == n and all(m["pi_model"] for m in top):
             changes.append(f"members {', '.join(have)} -> {', '.join(want)}")
             airo = bool(entry.get("prompts"))
-            members = [member_for(m, entry["members"][0], known_members(reg, entry["research"], airo), airo) for m in top]
+            template = entry["members"][0]
+            search = template["options"].get("search_backend") or "tavily"
+            known = known_members(reg, entry["research"], airo, search)
+            members = [member_for(m, template, known, airo) for m in top]
         else:
             warning = (f"WARNING: the top {n} is {', '.join(want) or 'unknown'} but the panel gives no pi ids "
                        f"to register; {name} keeps {', '.join(have)}")
@@ -251,6 +270,43 @@ def sync(reg, condition, panel, today=None, *, baseline_only=False):
     return new_name, f"{new_name}: registered, after {name} ({'; '.join(changes)})" + (f"; {warning}" if warning else "")
 
 
+def configure_chorus_search(reg, source):
+    """Use the existing Tavily Chorus configuration for a three-backend comparison."""
+    if source not in reg["conditions"]:
+        sys.exit(f"no Chorus condition {source!r} in the registry")
+    original = reg["conditions"][source]
+    entry = reg["names"][original["current"]]
+    if not entry["research"] or any((m["options"].get("search_backend") or "tavily") != "tavily"
+                                    for m in entry["members"]):
+        sys.exit(f"{source!r} must be a Tavily condition with research")
+    comparison = [source]
+    for search in ("exa", "keenable"):
+        condition = f"{source}-{search}"
+        comparison.append(condition)
+        new = copy.deepcopy(entry)
+        new.update(condition=condition, reason=f"Chorus search comparison using {search}")
+        for member in new["members"]:
+            member["options"]["search_backend"] = search
+            member["one_shot_baseline"] = None
+        new["fingerprint"] = fingerprint(new)
+        settings = reg["conditions"].get(condition, {})
+        current_entry = reg["names"].get(settings.get("current"), {})
+        if new["fingerprint"] != current_entry.get("fingerprint"):
+            place = next_place(reg, condition)
+            if place is None:
+                sys.exit(f"{condition}: every place in the registry is used; add places")
+            name = f"{condition}-{place}"
+            reg["names"][name] = new
+            settings = dict(settings, current=name, description=f"{original['description']} using {search}")
+        reg["conditions"][condition] = dict(settings, submit=True, public=False)
+    original["submit"] = True
+    for condition, settings in reg["conditions"].items():
+        if condition not in comparison:
+            settings["submit"] = False
+    submitted(reg)
+    return comparison
+
+
 def main(argv=None, stdin=None):
     argv = sys.argv[1:] if argv is None else argv
     reg = load()
@@ -265,12 +321,16 @@ def main(argv=None, stdin=None):
         print("\n".join(member_specs(reg, arg)))
     elif cmd == "fingerprint" and arg:
         print(fingerprint(reg["names"][reg["conditions"][arg]["current"]]))
+    elif cmd == "configure-chorus-search":
+        conditions = configure_chorus_search(reg, arg or "chorus")
+        if "--dry-run" not in argv:
+            save(reg)
+        for condition in conditions:
+            print(reg["conditions"][condition]["current"])
     elif cmd == "sync":
         before = json.dumps(reg, sort_keys=True)
         panel = parse_panel(stdin or sys.stdin)
         baseline_ensemble = "--baseline-ensemble" in argv
-        if baseline_ensemble and "ensemble" not in reg["conditions"]:
-            sys.exit("--baseline-ensemble requires the ensemble condition in the registry")
         notes = [sync(reg, c, panel, baseline_only=baseline_ensemble and c == "ensemble")[1]
                  for c in reg["conditions"]]
         changed = json.dumps(reg, sort_keys=True) != before
@@ -285,7 +345,7 @@ def main(argv=None, stdin=None):
             print(f"{cond['current']:18} {how:13} {len(e['members'])} member(s), {asked}: {cond['description']}")
     else:
         sys.exit("usage: python -m forecastbench.names current|members|fingerprint <condition> "
-                 "| sync [--dry-run] | conditions [--all] | public | show")
+                 "| configure-chorus-search [condition] [--dry-run] | sync [--dry-run] | conditions [--all] | public | show")
 
 
 if __name__ == "__main__":

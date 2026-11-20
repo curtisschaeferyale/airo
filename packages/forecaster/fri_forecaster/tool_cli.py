@@ -5,7 +5,7 @@ returns. One implementation for every harness, so comparisons are of loops,
 not search stacks. Keys come from the environment the harness passes down.
 
 The search backend also comes from that environment. FORECASTER_SEARCH is
-tavily (tools.py, the default), exa (exa_tools.py) or keenable
+exa (exa_tools.py, the default), tavily (tools.py) or keenable
 (keenable_tools.py): the same tools and result shapes. A caller sets it for
 each call with harness.run(env=...).
 
@@ -25,14 +25,20 @@ from fri_forecaster import exa_tools, keenable_tools, tools  # noqa: E402
 from fri_forecaster.keys import load_keys  # noqa: E402
 
 SEARCH_ENV = "FORECASTER_SEARCH"
+DEFAULT_SEARCH = "exa"
+SEARCH_KEYS = {"exa": "EXA_API_KEY", "tavily": "TAVILY_API_KEY"}
 BACKENDS = {"tavily": tools, "exa": exa_tools, "keenable": keenable_tools}
 
 
-def backend():
-    name = (os.environ.get(SEARCH_ENV) or "tavily").strip().lower()
+def search_name():
+    name = (os.environ.get(SEARCH_ENV, "").strip().lower() or DEFAULT_SEARCH)
     if name not in BACKENDS:
         sys.exit(f"{SEARCH_ENV}={name!r}: have {', '.join(BACKENDS)}")
-    return BACKENDS[name]
+    return name
+
+
+def backend():
+    return BACKENDS[search_name()]
 
 
 def web_search(**args):

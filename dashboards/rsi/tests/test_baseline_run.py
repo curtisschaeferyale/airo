@@ -15,7 +15,7 @@ def test_baseline_run_recovers_only_missing_member(tmp_path, monkeypatch):
     members = [{"key": key, "model": "fake/" + key} for key in ("first", "second")]
     monkeypatch.setattr(run, "PROJECT", tmp_path)
     monkeypatch.setattr(run.panel, "panel", lambda **kwargs: (members, {"snapshot": datetime.now(timezone.utc).date().isoformat()}))
-    monkeypatch.setattr(run.keys, "load_keys", lambda: ["TAVILY_API_KEY"])
+    monkeypatch.setattr(run.keys, "load_keys", lambda: ["EXA_API_KEY"])
     calls = []
 
     def scripted(**kwargs):
@@ -70,7 +70,7 @@ def test_paired_conditions_freeze_one_panel_and_never_pool_answers(tmp_path, mon
     members = [{"key": "one", "model": "fake/first"}]
     day = datetime.now(timezone.utc).date().isoformat()
     monkeypatch.setattr(run.panel, "panel", lambda **kwargs: (members, {"snapshot": day}))
-    monkeypatch.setattr(run.keys, "load_keys", lambda: ["TAVILY_API_KEY"])
+    monkeypatch.setattr(run.keys, "load_keys", lambda: ["EXA_API_KEY"])
     calls = []
 
     def scripted(**kw):
@@ -88,8 +88,8 @@ def test_paired_conditions_freeze_one_panel_and_never_pool_answers(tmp_path, mon
     assert [r["answers"]["Q3.2"]["probability"] for r in runs] == [40, 20]
     assert [r["web_access"] for r in runs] == ["full-web", "fri-blocked"]
     assert calls[0][0] == calls[1][0]
-    assert [env for _, env in calls] == [{BLOCK_ENV: "", BLOCK_DOMAINS_ENV: ""},
-                                         {BLOCK_ENV: "", BLOCK_DOMAINS_ENV: "forecastingresearch.org"}]
+    assert [env for _, env in calls] == [{"FORECASTER_SEARCH": "exa", BLOCK_ENV: "", BLOCK_DOMAINS_ENV: ""},
+                                         {"FORECASTER_SEARCH": "exa", BLOCK_ENV: "", BLOCK_DOMAINS_ENV: "forecastingresearch.org"}]
     monkeypatch.setattr(sys, "argv", ["run", "--resume", str(pair)])
     run.main()
     assert len(calls) == 2

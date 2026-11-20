@@ -45,15 +45,20 @@ A **condition** is a rule for what to forecast with, defined by rank on Epoch's 
   (`fri_forecaster.variants`; `none`, AIRO's Baseline, adds nothing). An entry lists them
   in `prompts`, and its forecast is the mean over every member under every prompt.
 
-In each mode with research, a member's tools search with Tavily (the default), with Exa
-(`forecastbench run --search exa`) or with Keenable (`--search keenable`). `--search all`
-runs one member for each backend, one after the other. `forecastbench build --member
-MODEL[@THINKING][,MODE],exa` selects the Exa member, and `,keenable` the Keenable member.
-To get one forecast set from more than one member, give `build` each member: the set is
-their mean. Exa needs `EXA_API_KEY` in the keys file. Keenable works without a key, with
-a limit of 1,000 requests an hour: for a full round, put `KEENABLE_API_KEY` in the keys
-file. The registry and `fb_round.sh` run Tavily members only: run and build the Exa and
-Keenable members by hand.
+In each mode with research, a member uses Exa by default. Select Tavily or
+Keenable with `forecastbench run --search tavily|keenable`. `--search all`
+runs a member per backend. `forecastbench build --member MODEL[@THINKING][,MODE][,SEARCH]`
+also defaults to Exa when research is enabled. Use `,tavily` to select existing
+Tavily members. Exa requires `EXA_API_KEY`, Tavily requires `TAVILY_API_KEY`, and
+Keenable accepts `KEENABLE_API_KEY` for rounds that exceed its public request limit.
+
+To prepare the three Chorus submissions, run
+`python -m forecastbench.names configure-chorus-search --dry-run` with the
+installation's private registry, then omit `--dry-run` to save. The command
+uses the current Tavily Chorus as the template, creates Exa and Keenable
+entries, and selects the three Chorus entries for submission. The round script
+runs each backend independently and builds a set for each. It keeps the
+existing Chorus visibility and submits the two new entries anonymously.
 
 **What goes up.** ForecastBench takes at most 3 sets a round and, since 2026-11-13, at
 most one under the team's own name; the rest carry its anonymous one (`Anonymous N`). A

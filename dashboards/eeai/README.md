@@ -69,7 +69,7 @@ The Baseline condition on the shared panel, both from `packages/forecaster`:
   model family, from the newest Epoch snapshot under the repository's `data/`
   (`EEAI_ECI_DIR` names another directory).
 - `fri_forecaster.baseline`: no system prompt, web search and page reading
-  offered (Tavily) and never required, reasoning at the top level, no debrief.
+  offered (Exa by default) and never required, reasoning at the top level, no debrief.
   This is AIRO's published `none` condition.
 - The models cannot search or read FRI's own pages (`forecastingresearch.org`
   and its subdomains, and FRI's Substack): the human panel's answers to this
@@ -87,7 +87,7 @@ python3 -m eeai run --synthetic --out DIR     # made-up answers, to look at the 
 python3 -m eeai build --runs DIR --site DIR
 ```
 
-A run refuses to start without `TAVILY_API_KEY`. Keys are read as the harness
+A run using the default search backend requires `EXA_API_KEY`. Keys are read as the harness
 reads them (`fri_forecaster/keys.py`).
 
 ## The page

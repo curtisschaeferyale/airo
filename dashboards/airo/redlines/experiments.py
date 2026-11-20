@@ -57,14 +57,14 @@ PUBLISHED = "airo"
 # (fri_forecaster.variants) since 2026-11-13: the ForecastBench driver asks
 # under the same ones, and the two must not drift.
 from fri_forecaster.variants import DEFAULT_VARIANT, VARIANTS  # noqa: E402,F401
-from fri_forecaster.tool_cli import BACKENDS  # noqa: E402
+from fri_forecaster.tool_cli import BACKENDS, DEFAULT_SEARCH  # noqa: E402
 
 INSTRUMENTS = ("standard", "minimal")
 # The loop: pi (agent-box), the only one since litellm left on 2026-10-22.
 # Still a setting, and still hashed, so a condition records the loop its
 # calls ran through.
 HARNESSES = ("pi",)
-# The search backends of the research tools. The first one, Tavily, is the default.
+# The search backends of the research tools.
 SEARCHES = tuple(BACKENDS)
 # Every setting a condition has, and its value when neither the experiment
 # nor the condition sets it.
@@ -76,7 +76,7 @@ DEFAULTS = {
     "model_set": DEFAULT_MODEL_SET,   # redlines.registry.MODEL_SETS
     "repeats": 1,                     # calls per model per run
     "url_block_patterns": None,       # agent-box's URL guard for these calls alone
-    "search": SEARCHES[0],            # the search backend of the research tools (SEARCHES)
+    "search": DEFAULT_SEARCH,            # the search backend of the research tools (SEARCHES)
     "recent_news": False,            # news access without the legacy ban
     "prior_self": False,             # use this shadow’s previous complete ensemble
     "prior_baseline": False,         # optional prior Baseline ensemble file
@@ -144,7 +144,7 @@ def condition_sha256(settings):
         del keep["news_cache"]
     if keep["max_turns"] is None:
         del keep["max_turns"]
-    if keep["search"] == SEARCHES[0]:
+    if keep["search"] == "tavily":  # historical runs lacked a search field
         del keep["search"]
     return hashlib.sha256(json.dumps(keep, sort_keys=True).encode()).hexdigest()
 

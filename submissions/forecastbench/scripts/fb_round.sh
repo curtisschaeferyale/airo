@@ -83,9 +83,10 @@ SYNC_NOTE="$("$PY" -m forecastbench.names sync --baseline-ensemble <<< "$PANEL")
 while read -r line; do log "$line"; done <<< "$SYNC_NOTE"
 for c in "${ALL[@]}"; do "$PY" -m forecastbench.names current "$c" >/dev/null || exit 3; done
 
-run_member() {  # a names.py member spec, MODEL@THINKING,MODE (research, noresearch, airo-<condition>); its calls at once
-  local spec="$1" workers="$2" model thinking mode rc
-  model="${spec%%@*}"; thinking="${spec#*@}"; thinking="${thinking%%,*}"; mode="${spec##*,}"
+run_member() {  # a names.py member spec, MODEL@THINKING,MODE[,SEARCH]
+  local spec="$1" workers="$2" head model thinking mode search rc
+  IFS=, read -r head mode search <<< "$spec"
+  model="${head%%@*}"; thinking="${head#*@}"
   local extra=()
   case "$mode" in
     research)   extra=(--research) ;;
@@ -93,9 +94,10 @@ run_member() {  # a names.py member spec, MODEL@THINKING,MODE (research, noresea
     airo-none)  extra=(--baseline) ;;
     airo-*)     extra=(--airo "${mode#airo-}") ;;
   esac
+  if [[ -n "$search" ]]; then extra+=(--search "$search"); fi
   "$PY" -u -m forecastbench run --root "$ROOT" --question-set "$QSET" --model "$model" \
       --thinking "$thinking" --workers "$workers" ${SAMPLE:+--sample "$SAMPLE"} ${TIMEOUT:+--timeout "$TIMEOUT"} \
-      ${extra[@]+"${extra[@]}"} >> "$ROOT/logs/$(echo "$model-$mode" | tr '/' '_').log" 2>&1
+      ${extra[@]+"${extra[@]}"} >> "$ROOT/logs/$(echo "$model-$mode${search:+-$search}" | tr '/' '_').log" 2>&1
   rc=$?
   log "$spec exited $rc (0 = complete, 1 = short of 95%, 2 = its key was refused)"
   # A refused key takes the provider's every member with it, and only a person

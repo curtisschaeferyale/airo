@@ -81,6 +81,14 @@ class ReadPage(unittest.TestCase):
         post.assert_not_called()
         self.assertEqual(out["error"], "page read failed: page unavailable")
 
+    def test_blocks_the_url_returned_with_contents(self):
+        reply = {"results": [{"url": "https://blocked.example/article", "text": "blocked text"}]}
+        with mock.patch.dict(os.environ, {tools.BLOCK_DOMAINS_ENV: "blocked.example"}), \
+                mock.patch.object(exa_tools, "_post", return_value=reply):
+            out = exa_tools.read_page("https://allowed.example/article")
+        self.assertEqual(out["text"], "")
+        self.assertIn("error", out)
+
     def test_failed_status(self):
         reply = {"results": [], "statuses": [{"id": "u", "status": "error", "error": {"tag": "CRAWL_NOT_FOUND"}}]}
         with mock.patch.dict(os.environ, {"EXA_API_KEY": "k"}), mock.patch.object(exa_tools, "_post", return_value=reply):
@@ -91,7 +99,9 @@ class ReadPage(unittest.TestCase):
 class Backend(unittest.TestCase):
     def test_choice(self):
         with mock.patch.dict(os.environ, {tool_cli.SEARCH_ENV: ""}):
-            self.assertIs(tool_cli.backend(), tools)                 # the default is Tavily
+            self.assertIs(tool_cli.backend(), exa_tools)
+        with mock.patch.dict(os.environ, {tool_cli.SEARCH_ENV: "tavily"}):
+            self.assertIs(tool_cli.backend(), tools)
         with mock.patch.dict(os.environ, {tool_cli.SEARCH_ENV: "Exa"}), \
                 mock.patch.object(exa_tools, "web_search", return_value="s"), \
                 mock.patch.object(exa_tools, "read_page", return_value="p"):

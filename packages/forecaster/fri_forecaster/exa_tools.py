@@ -4,7 +4,7 @@
 Same two tools as tools.py -- `web_search` and `read_page` -- with the same
 arguments and the same result shapes, so pi_tools.ts, the tool descriptions
 and the evidence records do not change. tool_cli.py uses this module when the
-environment sets FORECASTER_SEARCH=exa; the default is tools.py (Tavily).
+environment selects Exa or leaves the backend unset.
 
 Two additions to each result: `cost_usd`, Exa's own `costDollars.total` for
 the request, so a run can total its search cost from its evidence; and, on
@@ -127,7 +127,11 @@ def read_page(url, offset=0):
     except (urllib.error.URLError, ValueError, TimeoutError) as e:
         return {"url": url, "text": "", "error": f"page read failed: {e}"}
     results = data.get("results") or []
-    text = (results[0].get("text") or "") if results else ""
+    result = results[0] if results else {}
+    returned_url = result.get("url") or url
+    if domain_blocked(returned_url, blocked_domains()) or is_blocked(returned_url, blocked_patterns()):
+        return {"url": url, "text": "", "error": "page read failed: page unavailable"}
+    text = result.get("text") or ""
     if not text:
         st = [s for s in data.get("statuses") or [] if isinstance(s, dict)]
         why = ((st[0].get("error") or {}).get("tag") if st and isinstance(st[0].get("error"), dict)

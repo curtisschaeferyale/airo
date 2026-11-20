@@ -181,10 +181,11 @@ What FRI's dashboards share when they ask a standing panel of models (AIRO, EEAI
 - Node and pi **0.99.2**, pinned in `package.json`: `npm ci` in the checkout puts it where
   the harness looks (`harness.REPO_PI`). Override with `FORECASTER_PI` (a `pi` executable
   or its `cli.js`). pi owns model auth.
-- `TAVILY_API_KEY` for research, and the providers' API keys, from the environment or an
+- `EXA_API_KEY` for research with the default backend, and the providers' API keys, from the environment or an
   env file (`keys.py`).
-- Optional: `FORECASTER_SEARCH`, the search backend of the research tools. `tavily` is the
-  default. `exa` uses Exa's `deep` search (`exa_tools.py`, needs `EXA_API_KEY`) and `keenable` uses Keenable
+- Optional: `FORECASTER_SEARCH`, the search backend of the research tools. `exa` is the
+  default and uses Exa's `deep` search and Contents endpoint for page text.
+  `tavily` requires `TAVILY_API_KEY` and `keenable` uses Keenable
   (`keenable_tools.py`; `KEENABLE_API_KEY` is optional and removes the limit of 1,000
   requests an hour), with the same tools and result shapes. Keenable writes no summary of
   a search (`answer`), and its publish dates are less exact, so `recent_days` is too. Pass it per run with `harness.run(env=...)`.
