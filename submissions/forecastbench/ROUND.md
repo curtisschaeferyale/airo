@@ -197,7 +197,8 @@ Unattended, cron runs `scripts/fb_cron.sh <due>` instead: the same round, its ou
 is the installation's `alerts.json`). Each submitted set uploads as soon as
 its build passes validation, before the next condition starts. The second
 pass retries incomplete submissions. Conditions kept only for scoring run last.
-The runner pages at 20:00 UTC if the upload is still pending. It uses the
+At noon UTC the runner pages if the first set is below the pace needed for an
+18:00 UTC target. It pages again at 20:00 UTC if any upload is still pending. It uses the
 private settings in [the setup guide](README.md). A notice confirms the
 uploads; `upload FAILED` pages on upload errors, and `run FAILED` pages on build
 failures (unless the round already paged). Retry an upload with

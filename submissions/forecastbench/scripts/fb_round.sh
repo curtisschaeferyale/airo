@@ -177,6 +177,7 @@ run_pass() {
     if [[ "$phase" == submitted ]] && build "$pass" "$n" "$c" && [[ "$UPLOAD" == 1 ]]; then
       "$PY" -m forecastbench.upload --root "$ROOT" --set-number "$n" || return 4
       uploaded_sets[$n]=1
+      if [[ "$n" == 1 ]]; then : > "$ROOT/logs/first-upload-confirmed"; fi
       if [[ "$pass" == 1 ]]; then log "set $n: build exited 0 and upload confirmed"; fi
       if (( ${#uploaded_sets[@]} == ${#SETS[@]} )); then
         : > "$ROOT/logs/upload-confirmed"
