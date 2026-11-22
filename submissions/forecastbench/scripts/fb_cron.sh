@@ -17,14 +17,29 @@ ROOT="${ROUNDS_DIR:-$HERE/rounds}/$DUE"
 PY="${PY:-$HERE/../../.venv/bin/python}"
 mkdir -p "$ROOT/logs"
 
-"$HERE/scripts/fb_round.sh" "$DUE" >> "$ROOT/logs/cron.out" 2>&1
+rm -f "$ROOT/logs/upload-confirmed"
+if [[ "$(date -u +%F)" == "$DUE" ]]; then
+  alert_at="$(date -u -d "$DUE 20:00 UTC" +%s)"
+  seconds=$((alert_at - $(date -u +%s)))
+  (
+    if (( seconds > 0 )); then
+      sleep "$seconds" &
+      timer=$!
+      trap 'kill "$timer" 2>/dev/null; exit 0' TERM
+      wait "$timer"
+    fi
+    if [[ ! -e "$ROOT/logs/upload-confirmed" ]]; then
+      "$PY" -m fri_forecaster.alert send --deployment forecastbench --severity page --title 'upload still pending' \
+        --log "$ROOT/logs/round.log" "$DUE: no confirmed upload yet. Check progress before the midnight UTC deadline."
+    fi
+  ) >> "$ROOT/logs/cron.out" 2>&1 &
+  watchdog=$!
+  trap 'kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null' EXIT
+fi
+
+"$HERE/scripts/fb_round.sh" "$DUE" --upload >> "$ROOT/logs/cron.out" 2>&1
 rc=$?
-if [[ "$rc" == 0 ]]; then
-  # The uploader revalidates every registered set, its coverage and build hashes.
-  # A missing upload configuration fails visibly; it never falls back to manual.
-  "$PY" -m forecastbench.upload --root "$ROOT" >> "$ROOT/logs/cron.out" 2>&1
-  rc=$?
-elif [[ ! -e "$ROOT/logs/paged" ]]; then
+if [[ "$rc" != 0 && "$rc" != 4 && ! -e "$ROOT/logs/paged" ]]; then
   why="$(grep -hE 'FATAL|gave up|could not|NOT READY|SHORT' "$ROOT/logs/round.log" "$ROOT/summary.txt" 2>/dev/null | sort -u | tail -2 | cut -c1-200)"
   "$PY" -m fri_forecaster.alert send --deployment forecastbench --severity page --title "run FAILED" \
     --log "$ROOT/logs/round.log" "$DUE: exit $rc, due by 23:59 UTC. $why

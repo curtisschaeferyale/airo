@@ -7,8 +7,9 @@ import io
 import json
 import os
 from pathlib import Path
-import shlex
+import shutil
 import subprocess
+import textwrap
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -236,35 +237,68 @@ class UploadTest(unittest.TestCase):
 
 
 class CronTest(unittest.TestCase):
-    def test_upload_runs_only_after_successful_round_and_failure_propagates(self):
-        source = Path(__file__).parents[1] / 'scripts/fb_cron.sh'
+    def test_cron_prioritizes_submissions_and_propagates_failures(self):
+        source = Path(__file__).parents[1] / 'scripts'
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             scripts = root / 'scripts'
             scripts.mkdir()
-            cron = scripts / 'fb_cron.sh'
-            cron.write_text(source.read_text())
-            round_script = scripts / 'fb_round.sh'
-            round_script.write_text('#!/bin/bash\nexit "$FAKE_ROUND_RC"\n')
-            round_script.chmod(0o700)
-            fake_py = root / 'python'
-            fake_py.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$FAKE_CALLS"\n'
-                               'if [[ "$2" == forecastbench.upload ]]; then exit "$FAKE_UPLOAD_RC"; fi\n')
-            fake_py.chmod(0o700)
+            for name in ('fb_cron.sh', 'fb_round.sh'):
+                shutil.copy2(source / name, scripts / name)
+            def executable(name, body):
+                path = root / name
+                path.write_text('#!/bin/bash\n' + textwrap.dedent(body))
+                path.chmod(0o700)
+                return path
+
+            fake_py = executable('python', """
+                printf '%s\\n' "$*" >> "$FAKE_CALLS"
+                case "$2/$3" in
+                  forecastbench.names/conditions)
+                    echo submitted
+                    if [[ "${4:-}" == --all ]]; then echo optional; fi ;;
+                  forecastbench.names/current) echo example-oak ;;
+                  forecastbench.names/members) echo "test/$4@high,research" ;;
+                  forecastbench.names/aggregate) echo mean ;;
+                  forecastbench/run)
+                    if [[ "$FAKE_LATE" == 1 ]]; then sleep 0.1; fi ;;
+                  forecastbench/build) exit "$FAKE_BUILD_RC" ;;
+                  forecastbench.upload/--root) exit "$FAKE_UPLOAD_RC" ;;
+                esac
+                exit 0
+            """)
+            executable('curl', 'exit 0\n')
+            executable('date', """
+                case "$*" in
+                  '-u +%F') echo 2026-11-22 ;;
+                  '-u +%s') echo "$FAKE_LATE" ;;
+                  '-u -d 2026-11-22 20:00 UTC +%s') echo 1 ;;
+                  *) /usr/bin/date "$@" ;;
+                esac
+            """)
             conf = root / 'round.env'
-            conf.write_text(f'PY={shlex.quote(str(fake_py))}\nROUNDS_DIR={shlex.quote(str(root / "rounds"))}\n')
+            conf.write_text('panel_members() { echo "test member"; }\n')
             calls_path = root / 'calls'
-            env = dict(os.environ, FORECASTER_ROUND_ENV=str(conf), FAKE_CALLS=str(calls_path))
-            for build_rc, upload_rc, expected in ((0, 0, 0), (0, 1, 1), (1, 0, 1)):
-                calls_path.write_text('')
-                result = subprocess.run(['bash', str(cron), DUE],
-                                        env=dict(env, FAKE_ROUND_RC=str(build_rc), FAKE_UPLOAD_RC=str(upload_rc)),
-                                        capture_output=True, text=True)
-                self.assertEqual(result.returncode, expected, result.stderr)
-                calls = calls_path.read_text()
-                self.assertEqual('forecastbench.upload' in calls, build_rc == 0)
-                if build_rc:
-                    self.assertIn('run FAILED', calls)
+            env = dict(os.environ, FORECASTER_ROUND_ENV=str(conf), FAKE_CALLS=str(calls_path),
+                       PATH=f"{root}:{os.environ['PATH']}", PY=str(fake_py), ROUNDS_DIR=str(root / 'rounds'),
+                       FB_ORG='Example Team', SAMPLE='', PI_CODING_AGENT_DIR=str(root / 'pi'))
+            for build_rc, upload_rc, late, expected in ((0, 0, 0, 0), (0, 1, 0, 4), (1, 0, 0, 1), (0, 0, 1, 0)):
+                with self.subTest(build_rc=build_rc, upload_rc=upload_rc, late=late):
+                    calls_path.write_text('')
+                    result = subprocess.run(
+                        ['bash', str(scripts / 'fb_cron.sh'), DUE],
+                        env=dict(env, FAKE_BUILD_RC=str(build_rc), FAKE_UPLOAD_RC=str(upload_rc), FAKE_LATE=str(late)),
+                        capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    calls = calls_path.read_text()
+                    self.assertEqual('forecastbench.upload' in calls, build_rc == 0)
+                    self.assertEqual('test/optional' in calls, expected == 0)
+                    self.assertEqual('run FAILED' in calls, build_rc != 0)
+                    if expected == 0:
+                        self.assertLess(calls.rindex('-m forecastbench build'), calls.index('forecastbench.upload'))
+                        self.assertLess(calls.index('forecastbench.upload'), calls.index('test/optional'))
+                    if late:
+                        self.assertLess(calls.index('upload still pending'), calls.index('forecastbench.upload'))
 
 
 if __name__ == '__main__':
