@@ -17,20 +17,30 @@ ROOT="${ROUNDS_DIR:-$HERE/rounds}/$DUE"
 PY="${PY:-$HERE/../../.venv/bin/python}"
 mkdir -p "$ROOT/logs"
 
-rm -f "$ROOT/logs/upload-confirmed"
+rm -f "$ROOT/logs/upload-confirmed" "$ROOT/logs/first-upload-confirmed"
 if [[ "$(date -u +%F)" == "$DUE" ]]; then
-  alert_at="$(date -u -d "$DUE 20:00 UTC" +%s)"
-  seconds=$((alert_at - $(date -u +%s)))
   (
-    if (( seconds > 0 )); then
-      sleep "$seconds" &
-      timer=$!
-      trap 'kill "$timer" 2>/dev/null; exit 0' TERM
-      wait "$timer"
-    fi
+    # Progress pages supplement terminal failure alerts from the scheduler.
+    unset FRI_ALERT_LEDGER
+    timer=""
+    trap 'if [[ -n "$timer" ]]; then kill "$timer" 2>/dev/null; fi; exit 0' TERM
+    wait_until() {
+      local target seconds
+      target="$(date -u -d "$DUE $1 UTC" +%s)" || return
+      seconds=$((target - $(date -u +%s)))
+      if (( seconds > 0 )); then
+        sleep "$seconds" &
+        timer=$!
+        wait "$timer"
+        timer=""
+      fi
+    }
+    wait_until 12:00
+    "$PY" -m forecastbench.progress --root "$ROOT"
+    wait_until 20:00
     if [[ ! -e "$ROOT/logs/upload-confirmed" ]]; then
       "$PY" -m fri_forecaster.alert send --deployment forecastbench --severity page --title 'upload still pending' \
-        --log "$ROOT/logs/round.log" "$DUE: no confirmed upload yet. Check progress before the midnight UTC deadline."
+        --log "$ROOT/logs/round.log" "$DUE: some submissions are still pending. Check progress before midnight UTC."
     fi
   ) >> "$ROOT/logs/cron.out" 2>&1 &
   watchdog=$!

@@ -16,7 +16,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 import forecastbench as fb
-from forecastbench import names, upload
+from forecastbench import names, progress, upload
 
 
 DUE = '2026-11-22'
@@ -107,6 +107,13 @@ class UploadTest(unittest.TestCase):
         self.assertEqual(len(self.storage.writes), 1)
         self.assertEqual(result, json.loads((self.root / 'upload-receipt.json').read_text()))
         self.assertEqual(result['objects'][0]['name'], f'team/binary/{DUE}/{self.path.name}')
+
+    def test_noon_checkpoint_checks_market_and_dataset_completion_separately(self):
+        self.assertEqual(progress.behind_schedule(self.root, self.reg), [])
+        log = self.member_path / 'results.jsonl'
+        log.write_text(log.read_text().splitlines()[0] + '\n')
+        self.assertEqual(progress.behind_schedule(self.root, self.reg),
+                         [f'{self.member_path.name}: dataset 0/1'])
 
     def test_selected_upload_preserves_number_and_partial_receipt(self):
         self.reg['conditions']['second'] = {'current': 'second-oak'}
@@ -295,7 +302,7 @@ class CronTest(unittest.TestCase):
                 case "$*" in
                   '-u +%F') echo 2026-11-22 ;;
                   '-u +%s') echo "$FAKE_LATE" ;;
-                  '-u -d 2026-11-22 20:00 UTC +%s') echo 1 ;;
+                  '-u -d 2026-11-22 12:00 UTC +%s'|'-u -d 2026-11-22 20:00 UTC +%s') echo 1 ;;
                   *) /usr/bin/date "$@" ;;
                 esac
             """)
@@ -324,6 +331,7 @@ class CronTest(unittest.TestCase):
                     if expected == 0:
                         self.assertLess(calls.rindex('forecastbench.upload'), calls.index('test/optional'))
                     if late:
+                        self.assertLess(calls.index('forecastbench.progress'), calls.index('upload still pending'))
                         self.assertLess(calls.index('upload still pending'), calls.index('forecastbench.upload'))
 
 
