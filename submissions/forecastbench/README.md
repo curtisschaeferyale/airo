@@ -111,7 +111,7 @@ Do not place a test forecast into a live round without their agreement.
 
 For a real submission, configure the destination from the round invitation and
 run the upload-only command (also used by `scripts/fb_cron.sh` after a successful
-round). This retries saved forecasts without any paid model calls:
+build). This retries saved forecasts without any paid model calls:
 
 ```sh
 set -a
@@ -119,6 +119,9 @@ source "$HOME/.config/fri-forecaster/round.env"
 set +a
 "$PY" -m forecastbench.upload --root "$ROUNDS_DIR/YYYY-MM-DD"
 ```
+
+Add `--set-number N` to recover a single validated set while other builds are
+pending. Use its original set number from the private registry.
 
 The uploader selects only the registry's submitted conditions, checks each
 file's identity, build hashes, aggregate coverage and every member's coverage,

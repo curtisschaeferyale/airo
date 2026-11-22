@@ -168,6 +168,9 @@ ForecastBench pages **upload FAILED** on authentication, validation or upload
 failure, and sends a notice when submissions are confirmed uploaded. Fix an
 upload failure with the upload-only command in `submissions/forecastbench/README.md`;
 do not rerun paid forecasts.
+It pages **upload still pending** at 20:00 UTC if a running round has
+yet to confirm its upload. The scheduled round uploads before running
+conditions kept only for scoring.
 
 Notices: **condition failed** (outside the published number), **ECI fetch
 failed** (the forecast job stops), **news fetch failed**, **ensemble

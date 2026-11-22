@@ -59,23 +59,33 @@ def destination(prefix, due):
     return parsed.netloc, parsed.path.strip('/') + '/' + due
 
 
-def submissions(root, reg, org, public_org):
+def registered_sets(reg, org, public_org, due):
+    public = names.public_of(reg)
+    for n, condition in enumerate(names.submitted(reg), 1):
+        organization = public_org if condition in public else org
+        if not organization:
+            raise ValueError('Configure FB_ORG and, for public submissions, FB_PUBLIC_ORG')
+        yield n, condition, organization, f'{due}.{fb.file_org(organization)}.{n}.json'
+
+
+def submissions(root, reg, org, public_org, set_number=None):
     """Validate the exact submitted conditions, not a glob of everything in a round."""
     qbytes = (root / 'question_set.json').read_bytes()
     qset = json.loads(qbytes)
     due = qset['forecast_due_date']
     if root.name != due or qset['question_set'] != f'{due}-llm.json':
         raise ValueError('Upload refused: root must be the dated real round, not a rehearsal')
-    conditions = names.submitted(reg)
-    if not conditions:
+    registered = list(registered_sets(reg, org, public_org, due))
+    if not registered:
         raise ValueError('No submitted conditions in the registry')
+    if set_number is not None and not 1 <= set_number <= len(registered):
+        raise ValueError('Set number is outside the submitted registry order')
     prepared = []
-    for n, condition in enumerate(conditions, 1):
+    for n, condition, organization, filename in registered:
+        if set_number is not None and n != set_number:
+            continue
         name = names.current(reg, condition)
-        organization = public_org if condition in names.public_of(reg) else org
-        if not organization:
-            raise ValueError('Configure FB_ORG and, for public submissions, FB_PUBLIC_ORG')
-        path = root / f'{due}.{fb.file_org(organization)}.{n}.json'
+        path = root / filename
         if path.parent != root or path.is_symlink():
             raise ValueError('Invalid submission filename')
         data = path.read_bytes()
@@ -168,17 +178,23 @@ def confirmed(meta, bucket, name, data, due):
     return {k: meta[k] for k in ('bucket', 'name', 'md5Hash', 'size', 'generation', 'timeCreated')}
 
 
-def upload(root, reg, org, public_org, prefix, account, storage_factory=Storage):
+def upload(root, reg, org, public_org, prefix, account, storage_factory=Storage, *, set_number=None):
     root = Path(root).resolve()
     # One upload/retry at a time. Validation finishes before the first network write.
     with (root / '.upload.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        due, files = submissions(root, reg, org, public_org)
+        due, files = submissions(root, reg, org, public_org, set_number)
         check_window(due)
         bucket, prefix = destination(prefix, due)
         storage = storage_factory(account)
         receipt_path = root / 'upload-receipt.json'
         receipt = {'due': due, 'account': account, 'objects': [], 'status': 'uploading'}
+        expected = {prefix + '/' + filename for _, _, _, filename in registered_sets(reg, org, public_org, due)}
+        if set_number is not None and receipt_path.exists():
+            previous = json.loads(receipt_path.read_text())
+            if previous['due'] == due and previous['account'] == account:
+                receipt['objects'] = [obj for obj in previous['objects']
+                                      if obj['bucket'] == bucket and obj['name'] in expected]
         for filename, data in files:
             check_window(due)  # A long or retried round cannot cross into the next day unnoticed.
             name = prefix + '/' + filename
@@ -190,8 +206,9 @@ def upload(root, reg, org, public_org, prefix, account, storage_factory=Storage)
                 # Already exists, perhaps the previous request succeeded before a network
                 # failure. Read and compare; never silently skip or replace different bytes.
                 meta = storage.request(bucket, name)
-            receipt['objects'].append(confirmed(meta, bucket, name, data, due))
-            receipt['status'] = 'uploaded' if len(receipt['objects']) == len(files) else 'uploading'
+            obj = confirmed(meta, bucket, name, data, due)
+            receipt['objects'] = [prior for prior in receipt['objects'] if prior['name'] != name] + [obj]
+            receipt['status'] = 'uploaded' if {item['name'] for item in receipt['objects']} == expected else 'uploading'
             tmp = receipt_path.with_suffix('.json.tmp')
             tmp.write_text(json.dumps(receipt, indent=2) + '\n')
             tmp.replace(receipt_path)
@@ -228,7 +245,10 @@ def main(argv=None):
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument('--root')
     action.add_argument('--check-access', metavar='YYYY-MM-DD', help='explicit .txt probe; no forecasts or alerts')
+    parser.add_argument('--set-number', type=int, help='upload or retry one registered set by its original number')
     args = parser.parse_args(argv)
+    if args.set_number is not None and not args.root:
+        parser.error('--set-number requires --root')
     if args.check_access:
         try:
             check_access(*settings(), args.check_access)
@@ -239,7 +259,7 @@ def main(argv=None):
     try:
         prefix, account = settings()
         receipt = upload(args.root, names.load(), os.environ.get('FB_ORG'), os.environ.get('FB_PUBLIC_ORG'),
-                         prefix, account)
+                         prefix, account, set_number=args.set_number)
     except (Exception, SystemExit) as error:
         message = (f'{type(error).__name__}: {error}. Forecasts retained in {args.root}. '
                    'Fix access/configuration, source the private round.env with variables exported, '
@@ -247,8 +267,9 @@ def main(argv=None):
         print('UPLOAD FAILED: ' + message, file=sys.stderr)
         alert.send('forecastbench', 'upload FAILED', message, severity='page')
         return 1
-    alert.send('forecastbench', 'submissions uploaded',
-               f"{receipt['due']}: {len(receipt['objects'])} uploads confirmed.", severity='notice')
+    if receipt['status'] == 'uploaded':
+        alert.send('forecastbench', 'submissions uploaded',
+                   f"{receipt['due']}: {len(receipt['objects'])} uploads confirmed.", severity='notice')
     return 0
 
 

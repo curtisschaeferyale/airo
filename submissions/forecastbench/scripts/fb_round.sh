@@ -15,12 +15,13 @@
 # Writes $ROUNDS_DIR/<due>[-<tag>]/ and a one-screen summary.txt there.
 #
 # The conditions run in the registry's order, the submitted ones first, each
-# built as soon as its members are in: put the one that matters most first, so
-# a round that runs out of day has it. A second pass asks again what the first
-# left unanswered and builds each set for good.
+# built as soon as its members are in. Upload each validated set before
+# starting the next condition. Retry incomplete submitted sets before scoring.
 set -uo pipefail
 
 DUE="$1"; TAG="${2:-}"
+UPLOAD=0
+if [[ "$TAG" == --upload ]]; then UPLOAD=1; TAG=""; fi
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 CONF="${FORECASTER_ROUND_ENV:-$HOME/.config/fri-forecaster/round.env}"
 if [[ -f "$CONF" ]]; then set -a; source "$CONF"; set +a; fi
@@ -30,6 +31,10 @@ PY="${PY:-$HERE/../../.venv/bin/python}"
 SAMPLE="${SAMPLE:-}"
 CALLS="${CALLS:-12}"                            # pi calls at once, shared by the members that run together
 WAIT_UNTIL="${WAIT_UNTIL:-${DUE}T08:00:00Z}"    # give up waiting for the set after this
+if [[ "$UPLOAD" == 1 && ( -n "$SAMPLE" || "$(date -u +%F)" != "$DUE" ) ]]; then
+  echo "Automatic upload requires a full round on its UTC due date" >&2
+  exit 3
+fi
 
 export FORECASTER_ENV_FILE="${FORECASTER_ENV_FILE:-$HOME/.config/fri-forecaster/env}"
 export PI_CODING_AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.config/fri-forecaster/pi-agent}"
@@ -39,6 +44,7 @@ rm -f "$ROOT/logs/paged"
 # The submissions, in set-number order, are the registry's submitted
 # conditions; the others (OTHERS) only run, for scoring afterwards.
 SETS=($("$PY" -m forecastbench.names conditions)) || exit 3
+if (( ${#SETS[@]} == 0 )); then echo "No registered submission sets" >&2; exit 3; fi
 ALL=($("$PY" -m forecastbench.names conditions --all)) || exit 3
 OTHERS=(); for c in "${ALL[@]}"; do [[ " ${SETS[*]} " == *" $c "* ]] || OTHERS+=("$c"); done
 PUBLIC="$("$PY" -m forecastbench.names public)" || exit 3
@@ -56,7 +62,7 @@ page() {  # MESSAGE: "run FAILED" now, for what cannot wait for the round's end 
 QSET="$DUE-llm.json"
 URL="https://raw.githubusercontent.com/forecastingresearch/forecastbench-datasets/main/datasets/question_sets/$QSET"
 log "round $DUE${TAG:+ ($TAG)} -> $ROOT; waiting for $QSET"
-until curl -fsI "$URL" >/dev/null 2>&1; do
+until curl -fsI --max-time 30 "$URL" >/dev/null 2>&1; do
   if [[ "$(date -u +%FT%TZ)" > "$WAIT_UNTIL" ]]; then log "gave up: $QSET not published by $WAIT_UNTIL"; exit 2; fi
   sleep 120
 done
@@ -119,24 +125,41 @@ build() {  # pass, set number, condition: organization and model_organization ar
   org="$FB_ORG"; [[ "$c" == "$PUBLIC" ]] && org="$FB_PUBLIC_ORG"
   local args=(); for m in $("$PY" -m forecastbench.names members "$c"); do args+=(--member "$m"); done
   local aggregate
-  aggregate="$("$PY" -m forecastbench.names aggregate "$c")" || return 3
+  aggregate="$("$PY" -m forecastbench.names aggregate "$c")" || {
+    log "could not read aggregation for set $n"
+    if [[ "$pass" == 2 ]]; then build_failed=1; fi
+    return 3
+  }
   "$PY" -m forecastbench build --aggregate "$aggregate" --root "$ROOT" --set-number "$n" --name "$name" \
       --org "$org" "${args[@]}" > "$ROOT/logs/build-$n.log" 2>&1
   rc=$?
   if [[ $pass == 2 && $rc != 0 ]]; then build_failed=1; fi
-  # Only the last pass's line reads "build exited": fb_cron.sh and AIRO's
-  # scheduler count those, one per set.
+  # The production scheduler counts only final build successes.
   if [[ $pass == 2 ]]; then log "set $n ($name, as $org): build exited $rc (0 = ready to upload)"
-  else log "set $n ($name, as $org): after pass 1, build $rc (0 = ready to upload; pass 2 builds it again)"; fi
+  else log "set $n ($name, as $org): after pass 1, build $rc (0 = ready to upload)"; fi
+  return "$rc"
 }
 
-build_failed=0
-rm -f "$ROOT"/logs/key-refused-*
-for pass in 1 2; do                         # pass 2 resumes whatever pass 1 left incomplete
-  declare -A ran=()                         # a member is run once a pass (conditions share members)
-  n=0
-  for c in "${SETS[@]}" ${OTHERS[@]+"${OTHERS[@]}"}; do
-    todo=(); for spec in $("$PY" -m forecastbench.names members "$c"); do
+run_pass() {
+  local pass="$1" phase="$2"; shift 2
+  local -A ran=()
+  local c spec specs k workers at_once n=0
+  local -a todo
+  for c in "$@"; do
+    if [[ "$phase" == submitted ]]; then
+      n=$((n + 1))
+      if [[ -n "${uploaded_sets[$n]:-}" ]]; then
+        continue
+      fi
+    fi
+    specs="$("$PY" -m forecastbench.names members "$c")" || return 3
+    todo=()
+    for spec in $specs; do
+      if [[ "$phase" == submitted ]]; then
+        submitted_members[$spec]=1
+      elif [[ -n "${submitted_members[$spec]:-}" ]]; then
+        continue
+      fi
       [[ -n "${ran[$spec]:-}" ]] || { todo+=("$spec"); ran[$spec]=1; }
     done
     # CALLS is the machine's (a pi process is some 130 MB) and the providers'
@@ -151,9 +174,31 @@ for pass in 1 2; do                         # pass 2 resumes whatever pass 1 lef
       while (( $(jobs -rp | wc -l) >= at_once )); do wait -n; done
       run_member "$spec" "$workers" &
     done; wait
-    if [[ " ${SETS[*]} " == *" $c "* ]]; then n=$((n + 1)); build "$pass" "$n" "$c"; fi
+    if [[ "$phase" == submitted ]] && build "$pass" "$n" "$c" && [[ "$UPLOAD" == 1 ]]; then
+      "$PY" -m forecastbench.upload --root "$ROOT" --set-number "$n" || return 4
+      uploaded_sets[$n]=1
+      if [[ "$pass" == 1 ]]; then log "set $n: build exited 0 and upload confirmed"; fi
+      if (( ${#uploaded_sets[@]} == ${#SETS[@]} )); then
+        : > "$ROOT/logs/upload-confirmed"
+      fi
+    fi
   done
+  return 0
+}
+
+build_failed=0
+declare -A submitted_members=()
+declare -A uploaded_sets=()
+rm -f "$ROOT"/logs/key-refused-*
+for pass in 1 2; do
+  run_pass "$pass" submitted "${SETS[@]}" || exit "$?"
 done
+# Once final builds have failed, the scheduled run should report promptly.
+if [[ "$UPLOAD" != 1 || "$build_failed" == 0 ]]; then
+  for pass in 1 2; do
+    run_pass "$pass" optional "${OTHERS[@]}" || exit 3
+  done
+fi
 
 { echo "ForecastBench round $DUE${TAG:+ ($TAG)} on $(hostname), $(date -u +%FT%TZ)"
   echo "$SYNC_NOTE"
