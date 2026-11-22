@@ -89,9 +89,9 @@ class UploadTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             return fb.main(self.build_args)
 
-    def run_upload(self):
+    def run_upload(self, set_number=None):
         return upload.upload(self.root, self.reg, 'Example Team', None, PREFIX, ACCOUNT,
-                             storage_factory=lambda account: self.storage)
+                             storage_factory=lambda account: self.storage, set_number=set_number)
 
     def rewrite(self, fs):
         self.path.write_text(json.dumps(fs))
@@ -107,6 +107,22 @@ class UploadTest(unittest.TestCase):
         self.assertEqual(len(self.storage.writes), 1)
         self.assertEqual(result, json.loads((self.root / 'upload-receipt.json').read_text()))
         self.assertEqual(result['objects'][0]['name'], f'team/binary/{DUE}/{self.path.name}')
+
+    def test_selected_upload_preserves_number_and_partial_receipt(self):
+        self.reg['conditions']['second'] = {'current': 'second-oak'}
+        self.reg['names']['second-oak'] = dict(self.reg['names']['solo-oak'], condition='second')
+        with self.assertRaises(FileNotFoundError):
+            self.run_upload()
+        self.assertFalse(self.storage.writes)
+        self.assertEqual(self.run_upload(1)['status'], 'uploading')
+        self.build_args[self.build_args.index('--name') + 1] = 'second-oak'
+        self.build_args[-1] = '2'
+        self.assertEqual(self.build(), 0)
+        receipt = self.run_upload(2)
+        self.assertEqual(receipt['status'], 'uploaded')
+        self.assertEqual([obj['name'].rsplit('.', 2)[-2] for obj in receipt['objects']], ['1', '2'])
+        self.assertEqual(self.run_upload(1)['status'], 'uploaded')
+        self.assertEqual(len(self.storage.writes), 2)
 
     def test_median_registration_requires_median_build(self):
         entry = self.reg['names']['solo-oak']
@@ -256,13 +272,20 @@ class CronTest(unittest.TestCase):
                 case "$2/$3" in
                   forecastbench.names/conditions)
                     echo submitted
+                    echo second
                     if [[ "${4:-}" == --all ]]; then echo optional; fi ;;
                   forecastbench.names/current) echo example-oak ;;
                   forecastbench.names/members) echo "test/$4@high,research" ;;
                   forecastbench.names/aggregate) echo mean ;;
                   forecastbench/run)
                     if [[ "$FAKE_LATE" == 1 ]]; then sleep 0.1; fi ;;
-                  forecastbench/build) exit "$FAKE_BUILD_RC" ;;
+                  forecastbench/build)
+                    if [[ "$FAKE_BUILD_RC" == partial ]]; then
+                      until [[ "$1" == --set-number ]]; do shift; done
+                      [[ "$2" == 1 ]]
+                      exit $?
+                    fi
+                    exit "$FAKE_BUILD_RC" ;;
                   forecastbench.upload/--root) exit "$FAKE_UPLOAD_RC" ;;
                 esac
                 exit 0
@@ -282,7 +305,8 @@ class CronTest(unittest.TestCase):
             env = dict(os.environ, FORECASTER_ROUND_ENV=str(conf), FAKE_CALLS=str(calls_path),
                        PATH=f"{root}:{os.environ['PATH']}", PY=str(fake_py), ROUNDS_DIR=str(root / 'rounds'),
                        FB_ORG='Example Team', SAMPLE='', PI_CODING_AGENT_DIR=str(root / 'pi'))
-            for build_rc, upload_rc, late, expected in ((0, 0, 0, 0), (0, 1, 0, 4), (1, 0, 0, 1), (0, 0, 1, 0)):
+            for build_rc, upload_rc, late, expected in ((0, 0, 0, 0), (0, 1, 0, 4), (1, 0, 0, 1),
+                                                        (0, 0, 1, 0), ('partial', 0, 0, 1)):
                 with self.subTest(build_rc=build_rc, upload_rc=upload_rc, late=late):
                     calls_path.write_text('')
                     result = subprocess.run(
@@ -291,12 +315,14 @@ class CronTest(unittest.TestCase):
                         capture_output=True, text=True, timeout=10)
                     self.assertEqual(result.returncode, expected, result.stderr)
                     calls = calls_path.read_text()
-                    self.assertEqual('forecastbench.upload' in calls, build_rc == 0)
+                    self.assertEqual('forecastbench.upload' in calls, build_rc != 1)
                     self.assertEqual('test/optional' in calls, expected == 0)
                     self.assertEqual('run FAILED' in calls, build_rc != 0)
+                    if expected == 0 or build_rc == 'partial':
+                        self.assertLess(calls.index('forecastbench.upload'), calls.index('test/second'))
+                        self.assertEqual(calls.count('--set-number 1'), 2)  # one build and one upload
                     if expected == 0:
-                        self.assertLess(calls.rindex('-m forecastbench build'), calls.index('forecastbench.upload'))
-                        self.assertLess(calls.index('forecastbench.upload'), calls.index('test/optional'))
+                        self.assertLess(calls.rindex('forecastbench.upload'), calls.index('test/optional'))
                     if late:
                         self.assertLess(calls.index('upload still pending'), calls.index('forecastbench.upload'))
 

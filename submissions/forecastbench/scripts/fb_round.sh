@@ -15,8 +15,8 @@
 # Writes $ROUNDS_DIR/<due>[-<tag>]/ and a one-screen summary.txt there.
 #
 # The conditions run in the registry's order, the submitted ones first, each
-# built as soon as its members are in. Finish both passes and upload before
-# running conditions that are kept for scoring only.
+# built as soon as its members are in. Upload each validated set before
+# starting the next condition. Retry incomplete submitted sets before scoring.
 set -uo pipefail
 
 DUE="$1"; TAG="${2:-}"
@@ -136,7 +136,8 @@ build() {  # pass, set number, condition: organization and model_organization ar
   if [[ $pass == 2 && $rc != 0 ]]; then build_failed=1; fi
   # The production scheduler counts only final build successes.
   if [[ $pass == 2 ]]; then log "set $n ($name, as $org): build exited $rc (0 = ready to upload)"
-  else log "set $n ($name, as $org): after pass 1, build $rc (0 = ready to upload; pass 2 builds it again)"; fi
+  else log "set $n ($name, as $org): after pass 1, build $rc (0 = ready to upload)"; fi
+  return "$rc"
 }
 
 run_pass() {
@@ -145,6 +146,12 @@ run_pass() {
   local c spec specs k workers at_once n=0
   local -a todo
   for c in "$@"; do
+    if [[ "$phase" == submitted ]]; then
+      n=$((n + 1))
+      if [[ -n "${uploaded_sets[$n]:-}" ]]; then
+        continue
+      fi
+    fi
     specs="$("$PY" -m forecastbench.names members "$c")" || return 3
     todo=()
     for spec in $specs; do
@@ -167,22 +174,25 @@ run_pass() {
       while (( $(jobs -rp | wc -l) >= at_once )); do wait -n; done
       run_member "$spec" "$workers" &
     done; wait
-    if [[ "$phase" == submitted ]]; then n=$((n + 1)); build "$pass" "$n" "$c"; fi
+    if [[ "$phase" == submitted ]] && build "$pass" "$n" "$c" && [[ "$UPLOAD" == 1 ]]; then
+      "$PY" -m forecastbench.upload --root "$ROOT" --set-number "$n" || return 4
+      uploaded_sets[$n]=1
+      if [[ "$pass" == 1 ]]; then log "set $n: build exited 0 and upload confirmed"; fi
+      if (( ${#uploaded_sets[@]} == ${#SETS[@]} )); then
+        : > "$ROOT/logs/upload-confirmed"
+      fi
+    fi
   done
   return 0
 }
 
 build_failed=0
 declare -A submitted_members=()
+declare -A uploaded_sets=()
 rm -f "$ROOT"/logs/key-refused-*
 for pass in 1 2; do
-  run_pass "$pass" submitted "${SETS[@]}" || exit 3
+  run_pass "$pass" submitted "${SETS[@]}" || exit "$?"
 done
-
-if [[ "$UPLOAD" == 1 && "$build_failed" == 0 ]]; then
-  "$PY" -m forecastbench.upload --root "$ROOT" || exit 4
-  : > "$ROOT/logs/upload-confirmed"
-fi
 # Once final builds have failed, the scheduled run should report promptly.
 if [[ "$UPLOAD" != 1 || "$build_failed" == 0 ]]; then
   for pass in 1 2; do
