@@ -221,8 +221,9 @@ class UploadTest(unittest.TestCase):
         with patch.object(upload.names, 'load', return_value=self.reg), \
                 patch.object(upload, 'upload', side_effect=RuntimeError('authentication failed')), \
                 patch.object(upload.alert, 'send') as send:
-            self.assertEqual(upload.main(['--root', str(self.root)]), 1)
+            self.assertEqual(upload.main(['--root', str(self.root), '--set-number', '1']), 1)
         self.assertEqual(send.call_args.args[:2], ('forecastbench', 'upload FAILED'))
+        self.assertIn(f'--root {self.root} --set-number 1', send.call_args.args[2])
         self.assertEqual(send.call_args.kwargs['severity'], 'page')
 
     def test_personal_account_cannot_be_used_accidentally(self):
@@ -260,7 +261,7 @@ class UploadTest(unittest.TestCase):
 
 
 class CronTest(unittest.TestCase):
-    def test_cron_prioritizes_submissions_and_propagates_failures(self):
+    def test_cron_starts_delivery_and_propagates_failures(self):
         source = Path(__file__).parents[1] / 'scripts'
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -281,19 +282,12 @@ class CronTest(unittest.TestCase):
                     echo submitted
                     echo second
                     if [[ "${4:-}" == --all ]]; then echo optional; fi ;;
-                  forecastbench.names/current) echo example-oak ;;
-                  forecastbench.names/members) echo "test/$4@high,research" ;;
-                  forecastbench.names/aggregate) echo mean ;;
-                  forecastbench/run)
-                    if [[ "$FAKE_LATE" == 1 ]]; then sleep 0.1; fi ;;
-                  forecastbench/build)
-                    if [[ "$FAKE_BUILD_RC" == partial ]]; then
-                      until [[ "$1" == --set-number ]]; do shift; done
-                      [[ "$2" == 1 ]]
-                      exit $?
+                  forecastbench.round_run/--root)
+                    if [[ "$FAKE_LATE" == 1 ]]; then sleep 0.1; fi
+                    if [[ "$FAKE_ROUND_RC" == 0 ]]; then
+                      touch "$4/logs/first-upload-confirmed" "$4/logs/upload-confirmed"
                     fi
-                    exit "$FAKE_BUILD_RC" ;;
-                  forecastbench.upload/--root) exit "$FAKE_UPLOAD_RC" ;;
+                    exit "$FAKE_ROUND_RC" ;;
                 esac
                 exit 0
             """)
@@ -311,28 +305,21 @@ class CronTest(unittest.TestCase):
             calls_path = root / 'calls'
             env = dict(os.environ, FORECASTER_ROUND_ENV=str(conf), FAKE_CALLS=str(calls_path),
                        PATH=f"{root}:{os.environ['PATH']}", PY=str(fake_py), ROUNDS_DIR=str(root / 'rounds'),
-                       FB_ORG='Example Team', SAMPLE='', PI_CODING_AGENT_DIR=str(root / 'pi'))
-            for build_rc, upload_rc, late, expected in ((0, 0, 0, 0), (0, 1, 0, 4), (1, 0, 0, 1),
-                                                        (0, 0, 1, 0), ('partial', 0, 0, 1)):
-                with self.subTest(build_rc=build_rc, upload_rc=upload_rc, late=late):
+                       FB_ORG='Example Team', CALLS='12', SAMPLE='', PI_CODING_AGENT_DIR=str(root / 'pi'))
+            for expected, late in ((0, 0), (4, 0), (1, 0), (0, 1)):
+                with self.subTest(expected=expected, late=late):
                     calls_path.write_text('')
                     result = subprocess.run(
                         ['bash', str(scripts / 'fb_cron.sh'), DUE],
-                        env=dict(env, FAKE_BUILD_RC=str(build_rc), FAKE_UPLOAD_RC=str(upload_rc), FAKE_LATE=str(late)),
+                        env=dict(env, FAKE_ROUND_RC=str(expected), FAKE_LATE=str(late)),
                         capture_output=True, text=True, timeout=10)
                     self.assertEqual(result.returncode, expected, result.stderr)
                     calls = calls_path.read_text()
-                    self.assertEqual('forecastbench.upload' in calls, build_rc != 1)
-                    self.assertEqual('test/optional' in calls, expected == 0)
-                    self.assertEqual('run FAILED' in calls, build_rc != 0)
-                    if expected == 0 or build_rc == 'partial':
-                        self.assertLess(calls.index('forecastbench.upload'), calls.index('test/second'))
-                        self.assertEqual(calls.count('--set-number 1'), 2)  # one build and one upload
-                    if expected == 0:
-                        self.assertLess(calls.rindex('forecastbench.upload'), calls.index('test/optional'))
+                    self.assertIn('forecastbench.round_run', calls)
+                    self.assertIn(f'--due {DUE} --calls 12 --upload', calls)
+                    self.assertEqual('run FAILED' in calls, expected == 1)
                     if late:
                         self.assertLess(calls.index('forecastbench.progress'), calls.index('upload still pending'))
-                        self.assertLess(calls.index('upload still pending'), calls.index('forecastbench.upload'))
 
 
 if __name__ == '__main__':
