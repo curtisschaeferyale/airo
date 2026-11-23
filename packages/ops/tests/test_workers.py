@@ -98,23 +98,31 @@ def test_worker_uses_attempt_receipts_for_news_retries(runtime, monkeypatch):
     assert json.loads(receipt(runtime, key).read_text())['status'] == 'failed'
 
 
-def test_worker_expiry_is_reported_once_during_tick(runtime, monkeypatch):
-    key, job = enqueue(runtime, 'forecastbench')
+def test_worker_expiry_notice_resumes_from_its_receipt(runtime, monkeypatch):
+    key, _ = enqueue(runtime, 'forecastbench')
     alerts = []
     monkeypatch.setattr(runtime, 'execute_job', lambda *args, **kwargs: False)
-    monkeypatch.setattr(runtime, 'alert', lambda *args, **kwargs: alerts.append(kwargs['title']))
+
+    def send(*args, **kwargs):
+        assert kwargs['require_delivery'] is True
+        alerts.append(kwargs['title'])
+        return True
+
+    monkeypatch.setattr(runtime, 'alert', send)
 
     with runtime.lane_lock('forecast'):
         assert runtime.work_once('forecast')
     assert runtime.job_queue().list()[0]['status'] == 'expired'
     assert alerts == []
 
-    # An earlier tick wrote the receipt and died before it could send the notice.
+    # An earlier worker wrote the receipt and died before it could send the notice.
     production.write_json(receipt(runtime, key), {
         'key': key, 'status': 'expired', 'reason': 'Latest start time passed'})
     now = datetime.now(timezone.utc)
     runtime.queue_tick([], now)
-    runtime.queue_tick([], now)
+    assert alerts == []
+    runtime.report_queue_notices(now)
+    runtime.report_queue_notices(now + timedelta(minutes=2))
 
     assert alerts == ['scheduled job expired']
     assert runtime.job_queue().pending_expirations() == []
@@ -204,12 +212,65 @@ def test_idle_worker_does_not_scan_receipts_or_claim(runtime, monkeypatch):
     assert not runtime.job_queue().path.exists()
 
 
-def test_tick_reconciles_legacy_receipt_before_noticing_expiry(runtime, monkeypatch):
+def test_notice_reconciles_legacy_receipt_before_reporting_expiry(runtime, monkeypatch):
     now = datetime.now(timezone.utc)
     key, _ = enqueue(runtime, 'forecastbench', now=now - timedelta(hours=1))
     production.write_json(receipt(runtime, key), {'key': key, 'job': key, 'status': 'succeeded'})
     monkeypatch.setattr(runtime, 'alert', lambda *args, **kwargs: pytest.fail('legacy run succeeded'))
 
     runtime.queue_tick([], now)
+    runtime.report_queue_notices(now)
     assert runtime.job_queue().list()[0]['status'] == 'succeeded'
+    assert runtime.job_queue().pending_expirations() == []
+
+
+def test_tick_expires_without_running_preflight_or_sending_notice(runtime, monkeypatch):
+    now = datetime.now(timezone.utc)
+    key, _ = enqueue(runtime, 'forecast', now=now - timedelta(hours=1))
+    monkeypatch.setattr(runtime, 'alert', lambda *args, **kwargs: pytest.fail('tick cannot send alerts'))
+    monkeypatch.setattr(production, 'output', lambda *args, **kwargs: pytest.fail('tick cannot run preflight'))
+
+    runtime.queue_tick([], now)
+
+    assert runtime.job_queue().pending_expirations()[0]['key'] == key
+    assert not receipt(runtime, key).exists()
+
+
+def test_undelivered_notice_stays_pending_for_a_later_worker_pass(runtime, monkeypatch):
+    now = datetime.now(timezone.utc)
+    key, _ = enqueue(runtime, 'forecastbench', now=now - timedelta(hours=1))
+    attempts = []
+
+    def notify(*args, **kwargs):
+        attempts.append(kwargs)
+        return len(attempts) == 2
+
+    monkeypatch.setattr(runtime, 'alert', notify)
+    runtime.queue_tick([], now)
+    runtime.report_queue_notices(now)
+    runtime.report_queue_notices(now + timedelta(seconds=59))
+    assert len(attempts) == 1
+    assert runtime.job_queue().pending_expirations()[0]['key'] == key
+
+    runtime.report_queue_notices(now + timedelta(minutes=1))
+    assert len(attempts) == 2
+    assert all(attempt['require_delivery'] for attempt in attempts)
+    assert runtime.job_queue().pending_expirations() == []
+
+
+def test_worker_maintenance_sends_notice_without_holding_lanes(runtime, monkeypatch):
+    now = datetime.now(timezone.utc)
+    enqueue(runtime, 'forecastbench', now=now - timedelta(hours=1))
+    runtime.queue_tick([], now)
+    code = runtime.current.resolve() / 'code'
+    monkeypatch.setattr(production, '__file__', str(code / 'packages/ops/production.py'))
+    monkeypatch.setattr(runtime, 'worker_runtimes', lambda: [runtime])
+
+    def notify(*args, **kwargs):
+        with runtime.lane_lock('forecast', wait=False) as forecast, runtime.lane_lock('refresh', wait=False) as refresh:
+            assert forecast and refresh
+        return True
+
+    monkeypatch.setattr(runtime, 'alert', notify)
+    runtime.worker('forecast', once=True)
     assert runtime.job_queue().pending_expirations() == []

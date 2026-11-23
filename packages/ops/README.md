@@ -168,7 +168,9 @@ Pages, for every dashboard: **run FAILED** and **publish FAILED** (the run
 succeeded). The scheduler sends them for any job that failed without paging
 itself, was interrupted, or expired before starting. `scheduled_runs` in
 `airo status` shows the scheduled time, latest start, lane, attempts, and
-outcome. The expiry alert identifies a job that never started. Existing
+outcome. Workers send expiry notices from the durable queue after dispatch. A failed
+notification remains pending for a later delivery attempt. The alert identifies
+a job that never started. Existing
 receipts retain their original status. A job can send a more specific alert
 for a refused key or an incomplete submission. The ensemble is the top four by ECI of the models the installation
 holds an API key for; a model whose lab's key is not held is left out until

@@ -15,6 +15,7 @@ import socket
 from socketserver import ThreadingUnixStreamServer
 import subprocess
 import sys
+from threading import Thread
 import time
 import uuid
 import zipfile
@@ -390,7 +391,7 @@ exec "$PY" -m forecastbench.status --root "$rounds/$due" "$@"
             args.append('--require-uploaded')
         run(args, cwd=code, env=self.environment(code, self.root / 'tmp'), pass_fds=pass_fds)
 
-    def alert(self, job, message, log=None, title='run FAILED'):
+    def alert(self, job, message, log=None, title='run FAILED', *, require_delivery=False):
         """One alert through the release's shared sender (fri_forecaster.alert):
         a page that the run (or its publication) failed; for the news poll, a
         notice that the news fetch failed. Never raises."""
@@ -402,10 +403,12 @@ exec "$PY" -m forecastbench.status --root "$rounds/$due" "$@"
                 title = 'news fetch failed'
             argv = [code / '.venv/bin/python', '-m', 'fri_forecaster.alert', 'send', '--deployment', (self.name if job['kind'] in ('forecast', 'refresh') else DEPLOYMENT[job['kind']]),
                     '--severity', 'notice' if news else 'page', '--title', title,
-                    *(['--log', str(log)] if log else []), message]
-            subprocess.run(argv, cwd=code, env=env, timeout=120, check=False)
+                    *(['--log', str(log)] if log else []),
+                    *(['--require-delivery'] if require_delivery else []), message]
+            return subprocess.run(argv, cwd=code, env=env, timeout=120, check=False).returncode == 0
         except Exception as exc:
             print(f'Alert not sent ({type(exc).__name__}): {title}', file=sys.stderr)
+            return False
 
     def storage_status(self):
         disk = shutil.disk_usage(self.root)
@@ -1164,9 +1167,9 @@ exec "$PY" -m forecastbench.status --root "$rounds/$due" "$@"
             status, reason = saved['status'], saved.get('reason', row['reason'])
             if (job['kind'] == 'news-poll' and row['attempt'] > 0
                     and status in ('failed', 'interrupted')):
-                self.alert(job, f"{key} could no longer start within its retry window.",
-                           title='scheduled retry expired')
-                return 'expired', row['reason']
+                sent = self.alert(job, f"{key} could no longer start within its retry window.",
+                                  title='scheduled retry expired', require_delivery=True)
+                return ('expired', row['reason']) if sent else None
             # An existing legacy execution already carries its own outcome.
             # Only receipts produced by this expiry reporter need a notice.
             if status != 'expired' and saved.get('scheduled') != row['scheduled']:
@@ -1187,9 +1190,11 @@ exec "$PY" -m forecastbench.status --root "$rounds/$due" "$@"
                         status, reason = 'skipped', 'No forecast conditions due'
             write_json(receipt, {'key': key, 'job': job['id'], 'status': status, 'reason': reason,
                                  'scheduled': row['scheduled'], 'finished': row['finished']})
-        if status != 'skipped':
-            self.alert(job, f"{key} was due at {row['scheduled']}. {reason}. It never started.",
-                       title='scheduled job expired' if status == 'expired' else 'preflight FAILED')
+        if status != 'skipped' and not self.alert(
+                job, f"{key} was due at {row['scheduled']}. {reason}. It never started.",
+                title='scheduled job expired' if status == 'expired' else 'preflight FAILED',
+                require_delivery=True):
+            return None
         return status, reason
 
     def queue_tick(self, jobs, now):
@@ -1202,13 +1207,35 @@ exec "$PY" -m forecastbench.status --root "$rounds/$due" "$@"
         since = max(active_since, enabled_since, now - timedelta(days=2))
         queue.discover(now, jobs, scheduled_between, self.root / 'runs', since, enabled_since=enabled_since)
         queue.expire(now)
-        with (self.root / 'queue-notices.lock').open('a') as lock:
+
+    def report_queue_notices(self, now):
+        queue = self.job_queue()
+        if not queue.path.exists():
+            return
+        with (self.root / 'queue-notices.lock').open('a+') as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 return
-            for row in queue.pending_expirations():
-                status, reason = self.expire_job(row)
+            lock.seek(0)
+            last_pass = lock.read().strip()
+            try:
+                if last_pass and now - datetime.fromisoformat(last_pass) < timedelta(minutes=1):
+                    return
+            except ValueError:
+                pass  # A stopped worker may have left a partial timestamp.
+            pending = queue.pending_expirations()
+            if not pending:
+                return
+            lock.seek(0)
+            lock.truncate()
+            lock.write(now.isoformat())
+            lock.flush()
+            for row in pending:
+                result = self.expire_job(row)
+                if result is None:  # Leave this notice pending until a channel receives it.
+                    break
+                status, reason = result
                 queue.mark_expiry_reported(row['key'], now, status=status, reason=reason)
 
     def tick(self):
@@ -1392,14 +1419,25 @@ exec "$PY" -m forecastbench.status --root "$rounds/$due" "$@"
                 print(f'{runtime.name} {lane} worker: {error}', file=sys.stderr, flush=True)
         return handled
 
+    def worker_notices(self):
+        for runtime in self.worker_runtimes():
+            try:
+                runtime.report_queue_notices(datetime.now(timezone.utc))
+            except Exception as error:
+                print(f'{runtime.name} scheduled notice: {error}', file=sys.stderr, flush=True)
+
     def worker(self, lane, *, once=False):
         release = Path(__file__).resolve().parents[2]
         maintenance_due = 0
+        notices = None
         while True:
             handled = False
             if self.queue_enabled():
                 active_code = self.current.resolve(strict=True) / 'code'
                 if active_code != release:
+                    if notices is not None and notices.is_alive():
+                        notices.join(timeout=2)
+                        continue
                     # Load current scheduler code between jobs. It then pins
                     # the release selected for each job while that job executes.
                     argv = [sys.executable, str(active_code / LAUNCHER), '--config', str(self.config_path),
@@ -1407,12 +1445,17 @@ exec "$PY" -m forecastbench.status --root "$rounds/$due" "$@"
                     if once:
                         argv.append('--once')
                     os.execv(sys.executable, argv)
+                maintain = time.monotonic() >= maintenance_due
                 with self.lane_lock(lane, wait=False) as owns_lane:
                     if owns_lane:
-                        maintain = time.monotonic() >= maintenance_due
                         handled = self.worker_pass(lane, maintain=maintain)
-                        if maintain:
-                            maintenance_due = time.monotonic() + 60
+                if maintain:
+                    if once:
+                        self.worker_notices()
+                    elif notices is None or not notices.is_alive():
+                        notices = Thread(target=self.worker_notices, daemon=True)
+                        notices.start()
+                    maintenance_due = time.monotonic() + 60
             else:
                 maintenance_due = 0
             if once:

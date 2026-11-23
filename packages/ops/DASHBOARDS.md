@@ -90,8 +90,9 @@ publication. A publish-only retry never calls the forecasting models.
 }
 ```
 
-`panel_runtime_config` shares AIRO's private forecast home, operation lock,
-Epoch snapshots and automatic model registrations. A survey forecast refreshes
+`panel_runtime_config` shares AIRO's private forecast home, worker capacity,
+Epoch snapshots and automatic model registrations. In queue mode each dashboard
+has its own lock for selecting a release or publication. A survey forecast refreshes
 the panel through the primary release before starting paid calls. The
 date check in the runner also applies to manual calls. Each survey writes
 its own results, attempts, sites and receipts under its own root.
