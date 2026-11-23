@@ -90,8 +90,9 @@ publication. A publish-only retry never calls the forecasting models.
 }
 ```
 
-`panel_runtime_config` shares AIRO's private forecast home, operation lock,
-Epoch snapshots and automatic model registrations. A survey forecast refreshes
+`panel_runtime_config` shares AIRO's private forecast home, worker capacity,
+Epoch snapshots and automatic model registrations. In queue mode each dashboard
+has its own lock for selecting a release or publication. A survey forecast refreshes
 the panel through the primary release before starting paid calls. The
 date check in the runner also applies to manual calls. Each survey writes
 its own results, attempts, sites and receipts under its own root.
@@ -162,13 +163,34 @@ curl --fail --user reader https://rsi.example.org/release.json
 
 ## Schedule and recover runs
 
-Use the **one host timer**, `fri-dashboard-tick.timer`. It invokes
-`dashboardctl tick-all` every UTC minute. Each installed dashboard reads
-its own entries from the same repository file, `packages/ops/jobs.json`,
-at the commit it has deployed. Existing entries with no `dashboard` field
-belong to the primary AIRO installation, including ForecastBench rounds.
-The runtime refreshes panel state, runs the selected instrument on the server,
-validates the publication and switches that site's pointer.
+The host timer invokes `dashboardctl tick-all` every UTC minute. Each installed
+dashboard reads its own entries from `packages/ops/jobs.json` in its selected
+release. A scheduled occurrence has one durable key across timer ticks and
+service restarts. The forecast and refresh workers share capacity across all
+dashboard installations on the host. Each installation retains its own
+queue, execution receipts, and release history.
+
+To migrate an existing host:
+
+1. Deploy the checked commit to each installed dashboard. Keep the existing
+   timer and each dashboard's `jobs-enabled` marker in place.
+2. Install `packages/ops/examples/fri-dashboard-worker@.service` next to the
+   timer. Configure the same forecasting account, dashboard config directory,
+   launcher and network environment used by the scheduler. The refresh worker
+   needs the existing FRED route and the external publication verifier.
+3. During an idle minute, enable and start the forecast and refresh instances
+   and create `job-queue-enabled` under the primary runtime root. Check both
+   services, run a timer tick, and inspect queue status on every dashboard.
+4. Before reverting to the legacy scheduler, let running jobs finish and
+   inspect pending occurrences. Stop both workers before switching scheduling
+   modes. Preserve the databases and receipts.
+
+```sh
+systemctl daemon-reload
+systemctl enable --now fri-dashboard-worker@forecast.service fri-dashboard-worker@refresh.service
+dashboardctl airo status
+dashboardctl eeai doctor
+```
 
 RSI runs both Baseline research-access conditions every Friday at 02:00 UTC, ahead of AIRO’s 12:00 UTC decision. Its reviewed schedule is:
 
@@ -234,6 +256,8 @@ their values. Its keyless HTTPS request to the official FRED observations
 endpoint uses the scheduler's route. An identifiable FRED missing-key response
 establishes connectivity. The check makes no request with FRED credentials.
 
+In queue mode the doctor checks the active, enabled refresh worker, verifies
+which installation it serves, and probes FRED using that worker’s route.
 The route comes from a readable service process or observable systemd
 manager and unit properties, including simple literal `EnvironmentFile`
 assignments. An unreadable file, unsupported expansion or syntax, unavailable
