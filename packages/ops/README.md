@@ -123,6 +123,10 @@ left out of the ensemble; a key that is there and refused fails the run.
 
 ## Scheduling
 
+ForecastBench scheduling is paused: `jobs.json` contains no ForecastBench jobs.
+Keep future rounds unscheduled until an explicit decision to resume. The round
+runner, validation, upload, and recovery tooling remain available.
+
 Change `packages/ops/jobs.json` and merge/deploy it. The daily UTC wake-up delegates
 experiment selection to `experiments/*.toml`; days with nothing due make no paid
 calls. ForecastBench entries have explicit years and due dates. Creating a new
@@ -140,12 +144,21 @@ which of the team's names, is the private name registry's
 (`submissions/forecastbench/ROUND.md`): at most three sets, at
 most one of them public.
 
-A single lock excludes deployment, rollback and jobs from one another. The
-scheduler records a run **before** starting it. Failed/interrupted runs require
-inspection and an explicit recovery action; reboot never retries paid work or
-catches up missed dates automatically. A timer outage during a scheduled minute
-means a missed run, not an automatic later bill. Jobs run one at a time, so a
-long job (a ForecastBench round) also costs any job whose minute falls inside it.
+In queue mode the minute timer records each scheduled occurrence in the
+dashboard's private SQLite database under a unique job-and-time key. A
+host-wide forecast worker runs one paid job at a time. A separate refresh
+worker serves both news polls and economic-data refreshes. ForecastBench
+manages its own model concurrency within its forecast job. A long round can
+therefore overlap a news poll or an economic refresh.
+
+The default latest start for paid work is the end of its scheduled UTC minute.
+Refreshes have a two-hour start window. An occurrence that times out before
+starting is recorded as expired. An interrupted paid run requires operator
+inspection. A free news poll can retry up to twice, five minutes apart, while
+it remains fresh. EEAI publication retries use the existing verified-refresh
+command and its saved candidate. Each worker pins the release and private
+staging data it uses. A publishing job checks the active release and previous
+site before selecting a candidate. See [worker installation and migration](DASHBOARDS.md#schedule-and-recover-runs).
 
 **Alerts.** Every job alerts through one sender, `fri_forecaster.alert`: a caller
 says what happened (`page`: someone must act; `notice`: degraded, no deadline),
@@ -157,10 +170,13 @@ line down each channel).
 
 Pages, for every dashboard: **run FAILED** and **publish FAILED** (the run
 succeeded). The scheduler sends them for any job that failed without paging
-itself, was running when the scheduler stopped, or whose minute passed with no
-start; the receipt reads `failed`, `interrupted` or `missed`, and none is run
-late. A job sends its own when it knows more (a refused key, a set that is not
-ready). The ensemble is the top four by ECI of the models the installation
+itself, was interrupted, or expired before starting. `scheduled_runs` in
+`airo status` shows the scheduled time, latest start, lane, attempts, and
+outcome. Workers send expiry notices from the durable queue after dispatch. A failed
+notification remains pending for a later delivery attempt. The alert identifies
+a job that never started. Existing
+receipts retain their original status. A job can send a more specific alert
+for a refused key or an incomplete submission. The ensemble is the top four by ECI of the models the installation
 holds an API key for; a model whose lab's key is not held is left out until
 there is one. A run fails when any member of that ensemble cannot be reached:
 one that cannot be run, or one whose calls fail. No other model stands in.
@@ -168,6 +184,10 @@ ForecastBench pages **upload FAILED** on authentication, validation or upload
 failure, and sends a notice when submissions are confirmed uploaded. Fix an
 upload failure with the upload-only command in `submissions/forecastbench/README.md`;
 do not rerun paid forecasts.
+It pages at noon UTC if the first set is below the coverage needed to be on
+pace for an 18:00 UTC target. It pages **upload still pending** at 20:00 UTC if a running round has
+yet to confirm its upload. The scheduled round uploads before running
+conditions kept only for scoring.
 
 Notices: **condition failed** (outside the published number), **ECI fetch
 failed** (the forecast job stops), **news fetch failed**, **ensemble
@@ -266,3 +286,8 @@ Due forecasts prune disposable releases and publications before checking space.
 Scheduled jobs reuse installed code and shared state; their preflight reserves
 twice the current site size for a publication plus 2 GiB headroom, subject to the
 configured free-space floor. Deployments still reserve their code and data copies.
+
+`airo forecastbench-status [--due YYYY-MM-DD] [--history]` reads per-set
+progress and verified delivery receipts while a round is running. The scheduler
+requires a matching receipt for every registered submission before recording a
+successful ForecastBench job.

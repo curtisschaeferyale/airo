@@ -909,3 +909,19 @@ def test_wait_polls_pinned_commit_until_required_checks_pass(runtime, monkeypatc
     monkeypatch.setattr(p, 'run', lambda *a: None)
     monkeypatch.setattr(p.time, 'sleep', lambda seconds: None)
     assert runtime.merged_sha(sha, wait=True) == sha
+
+
+def test_forecastbench_status_uses_round_env_without_operation_lock(runtime, capfd):
+    active = release(runtime, 'active')
+    p.link(active, runtime.current)
+    conf = runtime.home / '.config/fri-forecaster/round.env'
+    conf.parent.mkdir(parents=True)
+    conf.write_text('ROUNDS_DIR="$HOME/saved rounds"\nPY=/bin/echo\n')
+    rounds = runtime.home / 'saved rounds'
+    for name in ['2030-01-01', '2030-01-15', '2030-02-01-rehearsal']:
+        (rounds / name).mkdir(parents=True)
+    with runtime.lock():
+        runtime.forecastbench_status(history=True)
+    assert f'{rounds}/2030-01-15 --history' in capfd.readouterr().out
+    runtime.forecastbench_status('2030-01-01', require_uploaded=True)
+    assert f'{rounds}/2030-01-01 --require-uploaded' in capfd.readouterr().out

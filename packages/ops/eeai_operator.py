@@ -151,16 +151,45 @@ def scheduler_timer(config):
                                               calendar)) if calendar else None}, unit.get('Triggers', '').split()
 
 
-def tick_command(unit):
+def dashboard_command(unit, expected):
     start = re.fullmatch(r'\{ path=(\S+) ; argv\[\]=([^;]*?)\s*; .*\}', unit.get('ExecStart', ''))
     if not start or unit.get('LoadState') != 'loaded':
         return None, False
     executable, argv = start.groups()
     args = argv.split()
-    if executable in ('/usr/bin/python3', '/usr/local/bin/python3') and len(args) == 3 and args[0] == executable:
+    if executable in ('/usr/bin/python3', '/usr/local/bin/python3') and len(args) == 2 + len(expected) and args[0] == executable:
         executable, argv = args[1], ' '.join(args[1:])
-    eligible = Path(executable).name == 'dashboardctl' and argv.split() == [executable, 'tick-all']
-    return [executable, 'tick-all' if eligible else '[arguments omitted]'], eligible
+    eligible = Path(executable).name == 'dashboardctl' and argv.split() == [executable, *expected]
+    return [executable, *(expected if eligible else ['[arguments omitted]'])], eligible
+
+
+def tick_command(unit):
+    return dashboard_command(unit, ['tick-all'])
+
+
+def installation_matches(route, path, dashboard):
+    if route is None or not path:
+        return None
+    directory = Path(route.get('DASHBOARD_CONFIG_DIR', '/etc/fri-dashboards'))
+    if directory.is_absolute():
+        try:
+            return (directory / (dashboard + '.json')).samefile(path)
+        except FileNotFoundError:
+            return False
+        except OSError:
+            pass
+
+
+def refresh_worker(config):
+    name = config.get('refresh_worker_service', 'fri-dashboard-worker@refresh.service')
+    unit = unit_properties(name, (*UNIT_PROPERTIES, 'ActiveState', 'UnitFileState'))
+    command, eligible = dashboard_command(unit, ['airo', 'worker', '--lane', 'refresh'])
+    details = dict(service=name, command=command, active=unit.get('ActiveState') == 'active',
+                   enabled=unit.get('UnitFileState') in ('enabled', 'enabled-runtime'))
+    if not eligible:
+        return details, None, 'systemd ExecStart unavailable or unsupported'
+    route, source = scheduler_environment(unit)
+    return details, route, source
 
 
 def scheduler(config):
