@@ -5,9 +5,11 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
 import ssl
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 import zipfile
@@ -186,7 +188,7 @@ print(json.dumps(checks))
                               env={**env, **overrides}, capture_output=True, text=True, timeout=25)
 
     return SimpleNamespace(cli=cli, root=root, active=active, old=old, public=public, original=original,
-                           code=code, settings=settings, systemd=systemd, envfile=envfile,
+                           code=code, settings=settings, systemd=systemd, envfile=envfile, env=env,
                            enable=lambda: (root / 'jobs-enabled').touch(), calls=calls, results=runs)
 
 
@@ -380,3 +382,103 @@ def test_direct_public_probe_distinguishes_login_stale_and_bin_content(monkeypat
     monkeypatch.setattr(operator, 'build_opener', lambda *handlers: Opener())
     assert operator.public_probe(expected) == {'release.json': 'login_redirect', 'index.html': 'verified',
                                                operator.ARCHIVE: 'stale'}
+
+
+@pytest.mark.parametrize('args,active,valid', [
+    ('airo worker --lane refresh', 'active', True),
+    ('airo worker --lane forecast', 'active', False),
+    ('airo worker --lane refresh', 'failed', False),
+])
+def test_doctor_uses_actual_refresh_worker_route(tmp_path, monkeypatch, args, active, valid):
+    worker = dict.fromkeys(operator.UNIT_PROPERTIES, '')
+    worker.update(LoadState='loaded', ActiveState=active, UnitFileState='enabled',
+                  ExecStart=f'{{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /bin/dashboardctl {args} ; pid=0 }}')
+    monkeypatch.setattr(operator, 'unit_properties', lambda *_: worker)
+    monkeypatch.setattr(operator, 'scheduler_environment',
+                        lambda unit: ({'DASHBOARD_CONFIG_DIR': str(tmp_path)}, 'service process'))
+    cfg = tmp_path / 'eeai.json'
+    cfg.touch()
+    info, route, _ = operator.refresh_worker({})
+    assert bool(info['active'] and operator.installation_matches(route, cfg, 'eeai')) == valid
+
+
+def test_two_workers_replay_november_22_while_forecast_process_is_running(installed, tmp_path):
+    """Exercise the dispatcher, SQLite claims, child processes and EEAI publication offline."""
+    directory = Path(installed.env['DASHBOARD_CONFIG_DIR'])
+    root = tmp_path / 'primary'
+    active = root / 'releases' / installed.active.name
+    code = active / 'code'
+    fb = code / 'submissions/forecastbench/scripts'
+    for path in [fb, code / 'code', code / 'dashboards/airo/code', code / 'packages/ops',
+                 code / '.venv/bin', active / 'site', root / 'home/.config/fri-forecaster']:
+        path.mkdir(parents=True, exist_ok=True)
+    # The live worker re-execs when its installed scheduler differs from current.
+    # Give this fixture a real installed module and retain its offline transports.
+    for module in OPS.glob('*.py'):
+        shutil.copy2(module, code / 'packages/ops' / module.name)
+    (code / 'packages/dashboard').symlink_to(ROOT / 'packages/dashboard')
+    shim = (installed.code / 'code/production.py').read_text()
+    (code / 'code/production.py').write_text(shim.replace(repr(str(OPS)), repr(str(code / 'packages/ops'))))
+    (active / 'release.json').write_text(json.dumps({'dashboard': 'airo', 'release': active.name}))
+    (root / 'current').symlink_to(active)
+    (root / 'home/.config/fri-forecaster/round.env').write_text('')
+    (code / '.venv/bin/python').write_text(
+        '#!/bin/sh\ncase "$*" in *forecastbench.status*) exit 0;; *recent_news.py*poll) '
+        'echo "news" >> "$FIXTURE_CALLS";; *) exit 19;; esac\n')
+    (code / '.venv/bin/python').chmod(0o755)
+    (fb / 'fb_cron.sh').write_text(
+        'set -eu\necho forecast >> "$FIXTURE_CALLS"\n'
+        'for ((i=0; i<600; i++)); do [[ -e "$FINISH_ROUND" ]] && exit 0; sleep 0.05; done\nexit 1\n')
+    primary = directory / 'airo.json'
+    primary.write_text(json.dumps(dict(root=str(root), path=os.environ['PATH'],
+                                      socket=str(root / 'site.sock'), min_free_bytes=0)))
+    installed.settings['panel_runtime_config'] = str(primary)
+    installed.cli('status').check_returncode()  # write the selected private config
+    due = '2026-11-22'
+    jobs = [dict(id='forecastbench-round', kind='forecastbench', at=due + 'T00:05:00Z', due=due),
+            dict(id='news', kind='news-poll', daily_utc='11:45'), JOB]
+    for package in [code, installed.code]:
+        (package / 'packages/ops/jobs.json').write_text(json.dumps(jobs))
+    for path in [root / 'jobs-enabled', installed.root / 'jobs-enabled', root / 'job-queue-enabled']:
+        path.touch()
+        os.utime(path, (0, 0))
+    for pointer in [root / 'current', installed.root / 'current']:
+        # The simulated scheduler only admits schedules active at the test time.
+        epoch = 1795305600  # 2026-11-22 00:00 UTC
+        os.utime(pointer, (epoch, epoch), follow_symlinks=False)
+    finish = tmp_path / 'finish-round'
+    def command(clock, *args, background=False):
+        argv = [sys.executable, OPS / 'dashboardctl', *args]
+        env = dict(installed.env, FIXTURE_NOW=f'{due}T{clock}:00Z', FINISH_ROUND=str(finish))
+        if background:
+            return subprocess.Popen(argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return subprocess.run(argv, env=env, capture_output=True, text=True, check=True, timeout=12)
+
+    command('00:05', 'tick-all')
+    paid = command('00:05', 'airo', 'worker', '--lane', 'forecast', '--once', background=True)
+    try:
+        for _ in range(200):
+            if installed.calls.exists() or paid.poll() is not None:
+                break
+            time.sleep(.025)
+        assert paid.poll() is None and installed.calls.read_text().splitlines() == ['forecast']
+        for clock in ('11:45', '15:15'):
+            command(clock, 'tick-all')
+            command(clock, 'tick-all')  # another scheduler process discovers the same minute
+            command(clock, 'airo', 'worker', '--lane', 'refresh', '--once')
+            assert paid.poll() is None
+        assert installed.calls.read_text().splitlines() == [
+            'forecast', 'news', 'upstream', 'publish job-eeai-economic-data-20261122']
+        receipt = json.loads((installed.root / 'runs/eeai-economic-data-20261122.json').read_text())
+        assert receipt['stage'] == 'verified'
+    finally:
+        finish.touch()
+        try:
+            _, err = paid.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            paid.kill()
+            paid.communicate()
+            raise
+    assert paid.returncode == 0, err
+    report = json.loads(command('15:15', 'airo', 'status').stdout)
+    assert {row['status'] for row in report['scheduled_runs']} == {'succeeded'}
