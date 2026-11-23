@@ -123,6 +123,12 @@ set +a
 Add `--set-number N` to recover a single validated set while other builds are
 pending. Use its original set number from the private registry.
 
+The round's `CALLS` setting bounds concurrent forecasts across the submitted
+sets. The first set has priority for available workers. Other sets start as
+workers free up, and each set uploads when its members pass validation. A set
+that fails validation can retry its members once. Scoring-only conditions
+start after the submitted sets finish successfully.
+
 The uploader selects only the registry's submitted conditions, checks each
 file's identity, build hashes, aggregate coverage and every member's coverage,
 and refuses rehearsals or uploads outside the round's UTC date. Existing builds

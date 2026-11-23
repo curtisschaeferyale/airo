@@ -261,9 +261,11 @@ def main(argv=None):
         receipt = upload(args.root, names.load(), os.environ.get('FB_ORG'), os.environ.get('FB_PUBLIC_ORG'),
                          prefix, account, set_number=args.set_number)
     except (Exception, SystemExit) as error:
+        selection = f' --set-number {args.set_number}' if args.set_number is not None else ''
         message = (f'{type(error).__name__}: {error}. Forecasts retained in {args.root}. '
                    'Fix access/configuration, source the private round.env with variables exported, '
-                   f'and retry python -m forecastbench.upload --root {args.root}; do not rerun forecasting.')
+                   f'and retry python -m forecastbench.upload --root {args.root}{selection}. '
+                   'This uses the saved forecasts.')
         print('UPLOAD FAILED: ' + message, file=sys.stderr)
         alert.send('forecastbench', 'upload FAILED', message, severity='page')
         return 1

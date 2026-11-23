@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# cron's entry for one ForecastBench round: scripts/fb_round.sh <due>, then one
-# validated upload and a success notice or failure page.
+# Cron's entry for one ForecastBench round. Run the round with per-set uploads
+# and page if progress falls behind or the round fails.
 #
 #   5 0 25 10 * /usr/bin/flock -n /tmp/fb-round.lock <checkout>/scripts/fb_cron.sh 2026-10-25
 #
