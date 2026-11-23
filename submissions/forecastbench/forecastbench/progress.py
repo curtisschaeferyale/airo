@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import forecastbench as fb
-from forecastbench import names
+from forecastbench import names, status
 from fri_forecaster import alert
 
 
@@ -41,7 +41,7 @@ def main():
     if behind and not (root / 'logs/first-upload-confirmed').exists():
         alert.send('forecastbench', 'first submission behind pace',
                    f'{root.name}: below the noon coverage checkpoint for an 18:00 UTC target. '
-                   + ', '.join(behind), log=root / 'logs/round.log')
+                   + ', '.join(behind) + '\n' + status.report(root)[0], log=root / 'logs/round.log')
 
 
 if __name__ == '__main__':

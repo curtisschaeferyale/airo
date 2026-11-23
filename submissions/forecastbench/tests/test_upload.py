@@ -1,7 +1,7 @@
 """Submission validation, non-overwriting retries and alerts; no cloud calls."""
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
@@ -16,7 +16,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 import forecastbench as fb
-from forecastbench import names, progress, upload
+from forecastbench import names, progress, status, upload
 
 
 DUE = '2026-11-22'
@@ -225,6 +225,66 @@ class UploadTest(unittest.TestCase):
         self.assertEqual(send.call_args.args[:2], ('forecastbench', 'upload FAILED'))
         self.assertIn(f'--root {self.root} --set-number 1', send.call_args.args[2])
         self.assertEqual(send.call_args.kwargs['severity'], 'page')
+
+    def record_plan(self):
+        status.record(self.root, 'round', pid=0, sets=[
+            dict(number=1, name='solo', filename=self.path.name,
+                 members=names.member_specs(self.reg, 'solo'))])
+
+    def test_overdue_alert_deduplicates_and_retries_undelivered_page(self):
+        self.record_plan()
+        with patch.object(status, 'now', return_value=NOW):
+            status.record(self.root, 'validated', number=1, attempt=1)
+        with patch.object(status.alert, 'send', side_effect=[0, 1]) as send:
+            with patch.object(status, 'now', return_value=NOW + timedelta(seconds=599)):
+                status.check_pending(self.root)
+            send.assert_not_called()
+            with patch.object(status, 'now', return_value=NOW + timedelta(minutes=10)):
+                status.check_pending(self.root)
+                status.check_pending(self.root)
+                status.page_once(self.root, 1, 'upload FAILED', 'late failure')
+                status.check_pending(self.root)
+            self.assertEqual(send.call_count, 2)
+            self.assertIn('--set-number 1', send.call_args.args[2])
+
+    def test_delivered_failure_page_suppresses_watchdog(self):
+        self.record_plan()
+        with patch.object(status, 'now', return_value=NOW):
+            status.record(self.root, 'validated', number=1, attempt=1)
+        with patch.object(status, 'now', return_value=NOW + timedelta(minutes=11)), \
+                patch.object(upload.names, 'load', return_value=self.reg), \
+                patch.object(upload, 'upload', side_effect=TimeoutError()), \
+                patch.object(status.alert, 'send', return_value=1) as send:
+            self.assertEqual(upload.main(['--root', str(self.root), '--set-number', '1']), 1)
+            status.check_pending(self.root)
+            send.assert_called_once()
+            self.assertIn('upload failed', status.report(self.root, history_lines=True)[0])
+
+    def test_status_checks_receipt_content_destination_and_recovery(self):
+        self.record_plan()
+        self.run_upload(1)
+        staged = self.root / 'partial-upload-test' / DUE
+        staged.mkdir(parents=True)
+        (self.root / 'upload-receipt.json').rename(staged / 'upload-receipt.json')
+        with patch.object(upload, 'settings', return_value=(PREFIX, ACCOUNT)):
+            self.assertTrue(status.report(self.root)[1])
+            self.path.write_bytes(b'changed')
+            self.assertFalse(status.report(self.root)[1])
+        self.build()
+        with patch.object(upload, 'settings', return_value=('gs://wrong-bucket/team/binary', ACCOUNT)):
+            self.assertFalse(status.report(self.root)[1])
+
+    def test_status_displays_member_category_and_latest_success(self):
+        self.record_plan()
+        path = self.member_path / 'results.jsonl'
+        market = json.loads(path.read_text().splitlines()[0])
+        market['completed_at'] = NOW.isoformat()
+        path.write_text(json.dumps(market) + '\n{"torn"')
+        text, complete = status.report(self.root)
+        self.assertFalse(complete)
+        self.assertIn('dataset 0/1 required', text)
+        self.assertIn('workers 0', text)
+        self.assertIn(NOW.isoformat(), text)
 
     def test_personal_account_cannot_be_used_accidentally(self):
         with self.assertRaisesRegex(ValueError, 'dedicated service-account'):

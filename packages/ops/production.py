@@ -283,6 +283,30 @@ class Runtime:
             run([code / '.venv/bin/python', '-m', 'forecastbench.upload', '--check-access', due],
                 env=self.environment(code, self.root / 'tmp'), cwd=code, timeout=360)
 
+    def forecastbench_status(self, due=None, history=False, require_uploaded=False):
+        code = self.current.resolve(strict=True) / 'code'
+        if due:
+            due = date.fromisoformat(due).isoformat()
+        script = """set -ea
+source "$FORECASTER_ROUND_ENV"
+rounds="${ROUNDS_DIR:-$HOME/forecastbench/rounds}"
+due="$1"
+shift
+if [[ -z "$due" ]]; then
+    for path in "$rounds"/????-??-??; do
+        [[ -d "$path" ]] && due="${path##*/}"
+    done
+fi
+if [[ -z "$due" ]]; then echo 'No ForecastBench rounds found'; exit 1; fi
+exec "$PY" -m forecastbench.status --root "$rounds/$due" "$@"
+"""
+        args = ['bash', '-c', script, 'forecastbench-status', due or '']
+        if history:
+            args.append('--history')
+        if require_uploaded:
+            args.append('--require-uploaded')
+        run(args, cwd=code, env=self.environment(code, self.root / 'tmp'))
+
     def alert(self, job, message, log=None, title='run FAILED'):
         """One alert through the release's shared sender (fri_forecaster.alert):
         a page that the run (or its publication) failed; for the news poll, a
@@ -843,13 +867,7 @@ class Runtime:
                     launched = True
                     run(argv, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT)
                 if job['kind'] == 'forecastbench':
-                    # fb_round's shell exit alone is insufficient; every expected set must build.
-                    round_root = self.home / 'forecastbench/rounds' / job['due']
-                    # Use the same CLI/config as the round, without exposing private names.
-                    count = int(output(['bash', '-o', 'pipefail', '-c', 'set -a; source "$FORECASTER_ROUND_ENV"; set +a; "$PY" -m forecastbench.names conditions | wc -l'], cwd=code, env=env))
-                    built = (round_root / 'logs/round.log').read_text().count('build exited 0')
-                    if count == 0 or built < count:
-                        raise RuntimeError('ForecastBench has incomplete submission sets')
+                    self.forecastbench_status(job['due'], require_uploaded=True)
                 stage = 'publish FAILED'   # the run succeeded; what follows only publishes it
                 if survey_job:
                     # The runners produce one file (EEAI) or directory (RSI).
@@ -1116,9 +1134,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default=os.environ.get('AIRO_RUNTIME_CONFIG', str(Path.home() / '.config/airo/runtime.json')))
     parser.add_argument('command', choices=['deploy', 'rollback', 'status', 'tick', 'serve', 'smoke', 'prune', 'storage', 'build-release',
-                                            'configure-forecastbench', 'check-forecastbench-upload', 'run-dashboard', 'republish',
+                                            'configure-forecastbench', 'forecastbench-status', 'check-forecastbench-upload', 'run-dashboard', 'republish',
                                             'doctor', 'refresh'])
     parser.add_argument('--upload-prefix', help='configure-forecastbench: gs://bucket/team-prefix/binary; key JSON on stdin')
+    parser.add_argument('--history', action='store_true', help='forecastbench-status: show per-set events')
     parser.add_argument('--due', help='check-forecastbench-upload: round folder date for a .txt access probe')
     parser.add_argument('--commit')
     parser.add_argument('--wait', action='store_true', help='EEAI deploy: wait for required checks and verify the served release')
@@ -1140,7 +1159,9 @@ def main():
     if args.command != 'refresh' and (args.verify or args.retry):
         parser.error('--verify and --retry apply to EEAI refresh')
     read_only = config.get('dashboard') == 'eeai' and args.command in ('doctor', 'status')
-    runtime = Runtime(config, config_path=args.config, read_only=read_only)
+    if args.history and args.command != 'forecastbench-status':
+        parser.error('--history applies to forecastbench-status')
+    runtime = Runtime(config, config_path=args.config, read_only=read_only or args.command == 'forecastbench-status')
     if args.command == 'deploy': runtime.deploy(args.commit, keep_publication=args.keep_publication, publish_data=args.publish_data, wait=args.wait)
     elif args.command == 'build-release': runtime.build_release(args.release, args.commit, keep_publication=args.keep_publication, publish_data=args.publish_data, wait=args.wait)
     elif args.command == 'run-dashboard':
@@ -1152,10 +1173,11 @@ def main():
         if receipt.get('status') not in ('succeeded', 'skipped'):
             raise SystemExit(1)
     elif args.command == 'smoke': runtime.execute_job(args.run_id or 'smoke-' + uuid.uuid4().hex[:12], {'id': 'smoke', 'kind': 'smoke'})
-    elif args.command in ('configure-forecastbench', 'check-forecastbench-upload') and runtime.name != 'airo':
+    elif args.command in ('configure-forecastbench', 'check-forecastbench-upload', 'forecastbench-status') and runtime.name != 'airo':
         parser.error('ForecastBench is managed by the AIRO runtime')
     elif args.command == 'configure-forecastbench': runtime.configure_forecastbench(args.upload_prefix, json.load(sys.stdin))
     elif args.command == 'check-forecastbench-upload': runtime.check_forecastbench_upload(args.due)
+    elif args.command == 'forecastbench-status': runtime.forecastbench_status(args.due, args.history)
     elif args.command == 'doctor': raise SystemExit(0 if runtime.doctor() else 1)
     elif args.command == 'refresh':
         try:

@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from forecastbench import names
+from forecastbench import file_org, names, status
 from fri_forecaster import alert
 
 
@@ -40,6 +40,7 @@ class RoundRun:
         self.logs = args.root / 'logs'
         self.round_log = self.logs / 'round.log'
         self.uploaded = 0
+        self.member_attempts = Counter()
 
     def log(self, message):
         line = f'{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ} {message}'
@@ -71,6 +72,7 @@ class RoundRun:
             rc = subprocess.run([sys.executable, '-u', '-m', 'forecastbench', *map(str, cmd)],
                                 stdout=log, stderr=subprocess.STDOUT).returncode
         self.log(f'{spec} exited {rc} (0 = complete, 1 = short of 95%, 2 = its key was refused)')
+        status.record(self.args.root, 'member finished', spec=spec, attempt=self.member_attempts[spec], rc=rc)
         if rc == 2:
             self.page_refused_key(model.split('/', 1)[0])
 
@@ -95,7 +97,8 @@ class RoundRun:
                         '--root', self.args.root, '--set-number', submission.number,
                         '--name', submission.name, '--org', submission.organization, *fields,
                         stdout=log, stderr=subprocess.STDOUT)
-        # The production scheduler counts a successful build once per set.
+        status.record(self.args.root, 'validated' if rc == 0 else 'validation failed',
+                      number=submission.number, attempt=attempt, rc=rc)
         self.log(f'set {submission.number} ({submission.name}, as {submission.organization}): '
                  f'pass {attempt}, build exited {rc} (0 = ready to upload)')
         return rc == 0
@@ -121,6 +124,9 @@ class RoundRun:
                 continue
             slots = min(desired, free)
             self.log(f'starting {spec} with {slots} worker(s)')
+            self.member_attempts[spec] += 1
+            status.record(self.args.root, 'member started', spec=spec,
+                          attempt=self.member_attempts[spec], workers=slots)
             active[spec] = (pool.submit(self.run_member, spec, slots), slots)
             free -= slots
 
@@ -199,6 +205,10 @@ class RoundRun:
                 submissions.append(Submission(len(submissions) + 1, name, org, aggregate, members))
             else:
                 optional.append(members)
+        status.record(self.args.root, 'round', pid=os.getpid(), sets=[
+            dict(number=s.number, name=s.name, members=s.members,
+                 filename=f'{self.args.due}.{file_org(s.organization)}.{s.number}.json')
+            for s in submissions])
         with ThreadPoolExecutor(max_workers=self.args.calls) as members, ThreadPoolExecutor(max_workers=1) as uploader:
             rc = self.run_submissions(members, uploader, submissions)
             if not self.args.upload or rc == 0:

@@ -53,6 +53,7 @@ folder (harness.new_attempt_dir), so a retry never reads an older answer;
 a call that ended in a provider error is retried three times by harness.run.
 """
 import statistics
+from datetime import datetime, timezone
 import argparse
 import hashlib
 import json
@@ -408,6 +409,7 @@ def cmd_run(args):
                       f"fix it in the keys file and run the member again")
                 return 2
             with lock:
+                r["completed_at"] = datetime.now(timezone.utc).isoformat()
                 with open(log, "a") as f:
                     f.write(json.dumps(r) + "\n")
                 spent[0] += r["usage"].get("cost_usd") or 0
