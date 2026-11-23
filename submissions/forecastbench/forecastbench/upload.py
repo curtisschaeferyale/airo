@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import urllib.error
@@ -256,7 +257,12 @@ def main(argv=None):
             print(f'Upload access check failed ({type(error).__name__}): {error}', file=sys.stderr)
             return 1
         return 0
+    from forecastbench import status
+    root = Path(args.root)
+    tracked = args.set_number is not None and root.is_dir()
     try:
+        if tracked:
+            status.record(root, 'upload started', number=args.set_number)
         prefix, account = settings()
         receipt = upload(args.root, names.load(), os.environ.get('FB_ORG'), os.environ.get('FB_PUBLIC_ORG'),
                          prefix, account, set_number=args.set_number)
@@ -264,11 +270,21 @@ def main(argv=None):
         selection = f' --set-number {args.set_number}' if args.set_number is not None else ''
         message = (f'{type(error).__name__}: {error}. Forecasts retained in {args.root}. '
                    'Fix access/configuration, source the private round.env with variables exported, '
-                   f'and retry python -m forecastbench.upload --root {args.root}{selection}. '
+                   f'and retry python -m forecastbench.upload --root {shlex.quote(str(root))}{selection}. '
                    'This uses the saved forecasts.')
         print('UPLOAD FAILED: ' + message, file=sys.stderr)
-        alert.send('forecastbench', 'upload FAILED', message, severity='page')
+        if tracked:
+            status.record(root, 'upload failed', number=args.set_number)
+            try:
+                status.page_once(root, args.set_number, 'upload FAILED', message)
+            except OSError:
+                # A full or unwritable round directory still needs an immediate page.
+                alert.send('forecastbench', 'upload FAILED', message, severity='page')
+        else:
+            alert.send('forecastbench', 'upload FAILED', message, severity='page')
         return 1
+    if tracked:
+        status.record(root, 'upload confirmed', number=args.set_number)
     if receipt['status'] == 'uploaded':
         alert.send('forecastbench', 'submissions uploaded',
                    f"{receipt['due']}: {len(receipt['objects'])} uploads confirmed.", severity='notice')

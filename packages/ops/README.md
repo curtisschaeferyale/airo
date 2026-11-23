@@ -270,3 +270,8 @@ Due forecasts prune disposable releases and publications before checking space.
 Scheduled jobs reuse installed code and shared state; their preflight reserves
 twice the current site size for a publication plus 2 GiB headroom, subject to the
 configured free-space floor. Deployments still reserve their code and data copies.
+
+`airo forecastbench-status [--due YYYY-MM-DD] [--history]` reads per-set
+progress and verified delivery receipts while a round is running. The scheduler
+requires a matching receipt for every registered submission before recording a
+successful ForecastBench job.

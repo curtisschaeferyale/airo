@@ -19,6 +19,8 @@ mkdir -p "$ROOT/logs"
 
 rm -f "$ROOT/logs/upload-confirmed" "$ROOT/logs/first-upload-confirmed"
 if [[ "$(date -u +%F)" == "$DUE" ]]; then
+  env -u FRI_ALERT_LEDGER "$PY" -m forecastbench.status --root "$ROOT" --watch >> "$ROOT/logs/cron.out" 2>&1 &
+  delivery_watchdog=$!
   (
     # Progress pages supplement terminal failure alerts from the scheduler.
     unset FRI_ALERT_LEDGER
@@ -40,11 +42,12 @@ if [[ "$(date -u +%F)" == "$DUE" ]]; then
     wait_until 20:00
     if [[ ! -e "$ROOT/logs/upload-confirmed" ]]; then
       "$PY" -m fri_forecaster.alert send --deployment forecastbench --severity page --title 'upload still pending' \
-        --log "$ROOT/logs/round.log" "$DUE: some submissions are still pending. Check progress before midnight UTC."
+        --log "$ROOT/logs/round.log" "$DUE: some submissions are still pending. Check progress before midnight UTC.
+$("$PY" -m forecastbench.status --root "$ROOT")"
     fi
   ) >> "$ROOT/logs/cron.out" 2>&1 &
   watchdog=$!
-  trap 'kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null' EXIT
+  trap 'kill "$watchdog" "$delivery_watchdog" 2>/dev/null; wait "$watchdog" "$delivery_watchdog" 2>/dev/null' EXIT
 fi
 
 "$HERE/scripts/fb_round.sh" "$DUE" --upload >> "$ROOT/logs/cron.out" 2>&1
